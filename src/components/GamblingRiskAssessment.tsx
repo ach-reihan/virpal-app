@@ -386,7 +386,7 @@ const GamblingRiskAssessment: React.FC<GamblingRiskAssessmentProps> = ({
               </ul>
             </div>
           </div>
-        </div>
+        </div>{' '}
         <button
           onClick={() => {
             setShowResults(false);
@@ -405,7 +405,7 @@ const GamblingRiskAssessment: React.FC<GamblingRiskAssessmentProps> = ({
               controlLevel: 10,
             });
           }}
-          className="w-full py-3 px-4 rounded-lg transition-colors theme-transition"
+          className="w-full py-3 px-4 rounded-lg cursor-pointer transition-all theme-transition hover:scale-[1.02] active:scale-[0.98]"
           style={{
             backgroundColor: 'var(--virpal-primary)',
             color: 'white',
@@ -490,7 +490,7 @@ const GamblingRiskAssessment: React.FC<GamblingRiskAssessmentProps> = ({
               {frequencyOptions.map((option) => (
                 <label
                   key={option.value}
-                  className="flex items-start space-x-3 p-3 border rounded-lg cursor-pointer transition-all theme-transition"
+                  className="flex items-start space-x-3 p-3 border rounded-lg cursor-pointer transition-all theme-transition hover:scale-[1.02] active:scale-[0.98]"
                   style={{
                     backgroundColor:
                       assessment.frequency === option.value
@@ -652,7 +652,7 @@ const GamblingRiskAssessment: React.FC<GamblingRiskAssessmentProps> = ({
               {emotionalTriggers.map((trigger) => (
                 <label
                   key={trigger}
-                  className="flex items-center space-x-3 p-3 border rounded-lg cursor-pointer transition-all theme-transition"
+                  className="flex items-center space-x-3 p-3 border rounded-lg cursor-pointer transition-all theme-transition hover:scale-105 active:scale-95"
                   style={{
                     backgroundColor: assessment.emotionalTriggers?.includes(
                       trigger
@@ -714,7 +714,7 @@ const GamblingRiskAssessment: React.FC<GamblingRiskAssessmentProps> = ({
                       {area === 'social' && '👥 Dampak Sosial'}
                       {area === 'work' && '💼 Dampak Pekerjaan'}
                       {area === 'family' && '👨‍👩‍👧‍👦 Dampak Keluarga'}: {value}/10
-                    </label>
+                    </label>{' '}
                     <input
                       type="range"
                       min="1"
@@ -729,13 +729,15 @@ const GamblingRiskAssessment: React.FC<GamblingRiskAssessmentProps> = ({
                           },
                         }))
                       }
-                      className="w-full h-2 rounded-lg appearance-none cursor-pointer theme-transition"
+                      className="w-full h-2 rounded-lg appearance-none cursor-pointer theme-transition hover:scale-105 active:scale-95"
                       style={{
-                        background: `linear-gradient(to right, var(--virpal-warning) 0%, var(--virpal-warning) ${
-                          (value - 1) * 11.11
-                        }%, var(--virpal-neutral-lighter) ${
-                          (value - 1) * 11.11
-                        }%, var(--virpal-neutral-lighter) 100%)`,
+                        background: `linear-gradient(to right,
+                          var(--virpal-warning) 0%,
+                          var(--virpal-warning) ${((value - 1) / 9) * 100}%,
+                          var(--virpal-neutral-lighter) ${
+                            ((value - 1) / 9) * 100
+                          }%,
+                          var(--virpal-neutral-lighter) 100%)`,
                       }}
                     />
                     <div
@@ -770,7 +772,7 @@ const GamblingRiskAssessment: React.FC<GamblingRiskAssessmentProps> = ({
                 style={{ color: 'var(--virpal-neutral-default)' }}
               >
                 Tingkat Kontrol: {assessment.controlLevel}/10
-              </label>
+              </label>{' '}
               <input
                 type="range"
                 min="1"
@@ -782,13 +784,17 @@ const GamblingRiskAssessment: React.FC<GamblingRiskAssessmentProps> = ({
                     controlLevel: parseInt(e.target.value),
                   }))
                 }
-                className="w-full h-2 rounded-lg appearance-none cursor-pointer theme-transition"
+                className="w-full h-2 rounded-lg appearance-none cursor-pointer theme-transition hover:scale-105 active:scale-95"
                 style={{
-                  background: `linear-gradient(to right, var(--virpal-danger) 0%, var(--virpal-danger) ${
-                    (10 - assessment.controlLevel!) * 11.11
-                  }%, var(--virpal-success) ${
-                    (10 - assessment.controlLevel!) * 11.11
-                  }%, var(--virpal-success) 100%)`,
+                  background: `linear-gradient(to right,
+                    var(--virpal-success) 0%,
+                    var(--virpal-success) ${
+                      ((assessment.controlLevel! - 1) / 9) * 100
+                    }%,
+                    var(--virpal-neutral-lighter) ${
+                      ((assessment.controlLevel! - 1) / 9) * 100
+                    }%,
+                    var(--virpal-neutral-lighter) 100%)`,
                 }}
               />
               <div
@@ -824,10 +830,11 @@ const GamblingRiskAssessment: React.FC<GamblingRiskAssessmentProps> = ({
         )}{' '}
         {/* Navigation */}
         <div className="flex flex-col sm:flex-row justify-between mt-8 gap-3 w-full risk-assessment-navigation">
+          {' '}
           <button
             onClick={() => setCurrentStep(Math.max(1, currentStep - 1))}
             disabled={currentStep === 1}
-            className="w-full sm:w-auto px-6 py-2 border rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-colors theme-transition"
+            className="w-full sm:w-auto px-6 py-2 border rounded-lg disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-all theme-transition hover:scale-105 active:scale-95"
             style={{
               backgroundColor:
                 currentStep === 1
@@ -853,12 +860,11 @@ const GamblingRiskAssessment: React.FC<GamblingRiskAssessmentProps> = ({
             }}
           >
             ← Sebelumnya
-          </button>
-
+          </button>{' '}
           <button
             onClick={handleStepComplete}
             disabled={isSubmitting}
-            className="w-full sm:w-auto px-6 py-2 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-colors theme-transition"
+            className="w-full sm:w-auto px-6 py-2 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-all theme-transition hover:scale-[1.02] active:scale-[0.98]"
             style={{
               backgroundColor: isSubmitting
                 ? 'var(--virpal-neutral-lighter)'
