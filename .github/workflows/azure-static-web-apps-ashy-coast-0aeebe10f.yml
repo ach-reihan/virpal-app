@@ -30,7 +30,6 @@ jobs:
 
       - name: Install dependencies
         run: npm install
-
       - name: Build Frontend and Functions
         run: npm run build
 
@@ -38,7 +37,17 @@ jobs:
         run: |
           mkdir -p api
           cp -r dist/* api/
-          ls -la api/
+          # Create a simple .funcignore file
+          echo "*.ts" > api/.funcignore
+          echo "*.map" >> api/.funcignore
+          echo "node_modules" >> api/.funcignore
+          # Ensure package.json has correct Node.js version
+          cd api
+          npm init -y --name="virpal-functions" --version="1.0.0"
+          npm pkg set engines.node=">=18.0.0"
+          npm pkg set type="module"
+          npm pkg set main="index.mjs"
+          ls -la
 
       - name: Install OIDC Client from Core Package
         run: npm install @actions/core@1.6.0 @actions/http-client
