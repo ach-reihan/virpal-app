@@ -322,6 +322,17 @@ function setupCORS() {
   }
 }
 
+// === COPY HOST.JSON ===
+function copyHostJson() {
+  const sourceHostJsonPath = path.join(__dirname, '..', 'host.json');
+  const destHostJsonPath = path.join(__dirname, '..', 'dist', 'host.json');
+  
+  if (fs.existsSync(sourceHostJsonPath)) {
+    fs.copyFileSync(sourceHostJsonPath, destHostJsonPath);
+    changes.push('Copied host.json to dist directory');
+  }
+}
+
 // === MAIN EXECUTION ===
 console.log('🔧 Setting up Azure Functions build (ES Modules with .mjs only)...');
 
@@ -331,6 +342,7 @@ convertFilesToMJS();
 setupServiceFiles();
 fixImportSyntax();
 setupCORS();
+copyHostJson();
 
 if (changes.length > 0) {
   console.log('✅ The following changes were made:');
