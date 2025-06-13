@@ -97,59 +97,115 @@ export function useTTSChat(options: UseTTSChatOptions = {}): UseTTSChatReturn {
     }
   }, []);
 
-  // Auto-initialize pada mount jika diminta, tapi tunggu autentikasi selesai
+  // Enhanced auto-initialization dengan better error handling
   useEffect(() => {
     if (autoInitialize && !isInitialized) {
-      // Delay initialization untuk memastikan MSAL sudah diinisialisasi
-      const delayedInit = setTimeout(() => {
-        initializeTTS();
-      }, 2000); // 2 detik delay untuk MSAL initialization
+      let initTimeout: NodeJS.Timeout;
+      let retryCount = 0;
+      const maxRetries = 3;
 
-      return () => clearTimeout(delayedInit);
+      const attemptInitialization = async () => {
+        try {
+          logger.debug(
+            `TTS initialization attempt ${retryCount + 1}/${maxRetries}`
+          );
+          const success = await initializeTTS();
+
+          if (!success && retryCount < maxRetries - 1) {
+            retryCount++;
+            const delay = 2000 * Math.pow(2, retryCount); // Exponential backoff
+            logger.debug(`TTS init failed, retrying in ${delay}ms`);
+
+            initTimeout = setTimeout(attemptInitialization, delay);
+          } else if (!success) {
+            logger.warn('TTS initialization failed after all retries');
+            setInitializationError(
+              'Failed to initialize TTS after multiple attempts'
+            );
+          }
+        } catch (error) {
+          logger.error('TTS initialization attempt failed:', error);
+          if (retryCount < maxRetries - 1) {
+            retryCount++;
+            const delay = 2000 * Math.pow(2, retryCount);
+            initTimeout = setTimeout(attemptInitialization, delay);
+          }
+        }
+      };
+
+      // Initial delay untuk memastikan MSAL sudah diinisialisasi
+      initTimeout = setTimeout(attemptInitialization, 2000);
+
+      return () => {
+        if (initTimeout) {
+          clearTimeout(initTimeout);
+        }
+      };
     }
-    // Return undefined for cases where the effect doesn't need cleanup
     return undefined;
   }, [autoInitialize, isInitialized, initializeTTS]);
 
-  // Monitor authentication status untuk retry TTS initialization
+  // Enhanced authentication monitoring dengan debouncing
   useEffect(() => {
-    if (!isInitialized && authService.isSafelyAuthenticated()) {
-      logger.debug(
-        'Authentication detected, clearing cache and retrying TTS initialization'
-      );
+    if (!isInitialized) {
+      const checkAuthentication = () => {
+        if (authService.isSafelyAuthenticated()) {
+          logger.debug('Authentication detected, attempting TTS retry');
 
-      // Clear cache for speech service secrets to force fresh fetch
-      frontendKeyVaultService.clearSecretsCache([
-        'azure-speech-service-key',
-        'azure-speech-service-region',
-        'azure-speech-service-endpoint',
-      ]);
+          // Clear cache for fresh credentials
+          frontendKeyVaultService.clearSecretsCache([
+            'azure-speech-service-key',
+            'azure-speech-service-region',
+            'azure-speech-service-endpoint',
+          ]);
 
-      retryTTSInitialization()
-        .then((success) => {
-          setIsInitialized(success);
-          if (success) {
-            logger.debug('TTS successfully initialized after authentication');
-          }
-          return success;
-        })
-        .catch((error) => {
-          logger.error('Failed to retry TTS initialization after auth', error);
-          return false;
-        });
+          // Retry initialization
+          retryTTSInitialization()
+            .then((success) => {
+              setIsInitialized(success);
+              if (success) {
+                logger.info(
+                  '✅ TTS successfully initialized after authentication'
+                );
+                setInitializationError(null);
+              } else {
+                logger.warn('⚠️ TTS retry failed even after authentication');
+              }
+              return success;
+            })
+            .catch((error) => {
+              logger.error('❌ TTS retry failed after authentication:', error);
+              setInitializationError(
+                'Authentication successful but TTS initialization failed'
+              );
+              return false;
+            });
+        }
+      };
+
+      // Debounced auth check
+      const authTimeout = setTimeout(checkAuthentication, 1000);
+
+      return () => {
+        clearTimeout(authTimeout);
+      };
     }
-    // Return undefined for cases where the effect doesn't need cleanup
     return undefined;
   }, [isInitialized]);
 
-  // Periodic check untuk Azure Speech Service availability
+  // Enhanced periodic health check
   useEffect(() => {
-    if (isInitialized && !isAzureSpeechServiceAvailable()) {
-      logger.debug('Azure Speech Service not available, checking again...');
-      // Set timeout untuk recheck
-      const recheckTimer = setTimeout(() => {
-        if (authService.isSafelyAuthenticated()) {
-          // Clear cache before retrying
+    if (isInitialized) {
+      const healthCheckInterval = setInterval(() => {
+        if (
+          !isAzureSpeechServiceAvailable() &&
+          authService.isSafelyAuthenticated()
+        ) {
+          logger.debug(
+            '🔍 Periodic TTS health check - service unavailable, attempting recovery'
+          );
+
+          // Clear cache and retry
           frontendKeyVaultService.clearSecretsCache([
             'azure-speech-service-key',
             'azure-speech-service-region',
@@ -159,21 +215,23 @@ export function useTTSChat(options: UseTTSChatOptions = {}): UseTTSChatReturn {
           retryTTSInitialization()
             .then((success) => {
               if (success) {
-                logger.debug('Azure Speech Service now available');
-                setIsInitialized(true); // Update state
+                logger.info('🔄 TTS service recovered during health check');
+              } else {
+                logger.warn(
+                  '⚠️ TTS service still unavailable after health check retry'
+                );
               }
               return success;
             })
-            .catch((error) => {
-              logger.error('Failed to retry TTS after periodic check', error);
+            .catch(() => {
+              logger.error('❌ TTS health check recovery failed');
               return false;
             });
         }
-      }, 5000);
+      }, 30000); // Check every 30 seconds
 
-      return () => clearTimeout(recheckTimer);
+      return () => clearInterval(healthCheckInterval);
     }
-    // Return undefined for cases where the effect doesn't need cleanup
     return undefined;
   }, [isInitialized]);
 
@@ -184,7 +242,7 @@ export function useTTSChat(options: UseTTSChatOptions = {}): UseTTSChatReturn {
         unlockAudioContext();
         setAudioContextUnlocked(true);
         logger.debug('Audio context unlocked');
-      } catch (error) {
+      } catch {
         logger.warn('Failed to unlock audio context');
       }
     }
@@ -196,21 +254,35 @@ export function useTTSChat(options: UseTTSChatOptions = {}): UseTTSChatReturn {
     logger.debug('TTS enabled');
   }, []);
 
-  const disableTTS = useCallback(() => {
+  // Stop current speech
+  const stopSpeaking = useCallback(() => {
+    if (isSpeaking) {
+      try {
+        stopAzureTTS();
+        setIsSpeaking(false);
+        logger.debug('TTS playback stopped');
+      } catch {
+        logger.error('Failed to stop TTS playback');
+      }
+    }
+  }, [isSpeaking]);
+
+  // Disable TTS and stop speaking if active
+  const disableTTSWithStop = useCallback(() => {
     setIsEnabled(false);
     if (isSpeaking) {
       stopSpeaking();
     }
     logger.debug('TTS disabled');
-  }, [isSpeaking]);
+  }, [isSpeaking, stopSpeaking]);
 
   const toggleTTS = useCallback(() => {
     if (isEnabled) {
-      disableTTS();
+      disableTTSWithStop();
     } else {
       enableTTS();
     }
-  }, [isEnabled, enableTTS, disableTTS]);
+  }, [isEnabled, enableTTS, disableTTSWithStop]);
 
   // Speak a message
   const speakMessage = useCallback(
@@ -240,19 +312,6 @@ export function useTTSChat(options: UseTTSChatOptions = {}): UseTTSChatReturn {
     [isEnabled, isInitialized, isSpeaking]
   );
 
-  // Stop current speech
-  const stopSpeaking = useCallback(() => {
-    if (isSpeaking) {
-      try {
-        stopAzureTTS();
-        setIsSpeaking(false);
-        logger.debug('TTS playback stopped');
-      } catch (error) {
-        logger.error('Failed to stop TTS playback');
-      }
-    }
-  }, [isSpeaking]);
-
   // Computed properties
   const canSpeak = isInitialized && isEnabled && !isSpeaking;
 
@@ -266,7 +325,7 @@ export function useTTSChat(options: UseTTSChatOptions = {}): UseTTSChatReturn {
     // Actions
     initializeTTS,
     enableTTS,
-    disableTTS,
+    disableTTS: disableTTSWithStop,
     toggleTTS,
     speakMessage,
     stopSpeaking,

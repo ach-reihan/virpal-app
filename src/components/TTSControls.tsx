@@ -52,12 +52,21 @@ const TTSControls: React.FC<TTSControlsProps> = ({
     if (isEnabled) return '🔉';
     return '🔇';
   };
-
   const getStatusColor = () => {
     if (initializationError) return 'text-red-500';
-    if (isSpeaking) return 'text-blue-500';
-    if (isEnabled) return 'text-green-500';
+    if (isSpeaking) return 'text-blue-500 animate-pulse';
+    if (isEnabled && isInitialized) return 'text-green-500';
+    if (!isAuthenticated) return 'text-yellow-500';
     return 'text-gray-400';
+  };
+
+  const getStatusText = () => {
+    if (!isAuthenticated) return 'Login required';
+    if (initializationError) return 'Error';
+    if (!isInitialized) return 'Initializing...';
+    if (isSpeaking) return 'Speaking';
+    if (isEnabled) return 'Ready';
+    return 'Disabled';
   };
   const getTooltipText = () => {
     if (!isAuthenticated)
@@ -124,20 +133,10 @@ const TTSControls: React.FC<TTSControlsProps> = ({
       </button>{' '}
       {/* Status Indicator */}
       <div className="flex flex-col">
+        {' '}
         <span className={`text-xs font-medium ${getStatusColor()}`}>
-          {!isAuthenticated
-            ? 'Login Required'
-            : isSpeaking
-            ? 'Speaking...'
-            : isEnabled
-            ? 'TTS On'
-            : initializationError
-            ? 'TTS Error'
-            : isInitialized
-            ? 'TTS Off'
-            : 'Loading...'}
+          {getStatusText()}
         </span>
-
         {/* Voice info when speaking */}
         {isSpeaking && (
           <span className="text-xs text-gray-500">Brian Neural</span>

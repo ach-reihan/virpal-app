@@ -5,16 +5,9 @@
   "type": "module",
   "main": "index.mjs",
   "engines": {
-    "node": "20"
-  },
-  "scripts": {
-    "build": "echo 'No build step required for JS functions'",
-    "start": "func start"
+    "node": ">=18"
   },
   "dependencies": {
     "@azure/functions": "^4.0.0"
-  },
-  "devDependencies": {
-    "azure-functions-core-tools": "^4.0.0"
   }
 }

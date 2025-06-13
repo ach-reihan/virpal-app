@@ -222,7 +222,7 @@ function getAudioContext(): AudioContext {
 /**
  * Load Azure Speech Service credentials secara aman dari Azure Key Vault
  * Menggunakan Managed Identity untuk autentikasi
- * Uses caching to prevent repeated credential loading
+ * Uses caching to prevent repeated credential loading with improved retry logic
  */
 async function loadAzureSpeechCredentials(): Promise<boolean> {
   logger.debug(
@@ -240,26 +240,38 @@ async function loadAzureSpeechCredentials(): Promise<boolean> {
     logger.debug('Waiting for ongoing credential loading');
     return await credentialsLoadPromise;
   }
-  // Start credential loading process
+  // Start credential loading process with enhanced error handling
   credentialsLoadPromise = (async () => {
     try {
       logger.debug('Loading Azure Speech Service credentials from Key Vault');
 
-      // Check if authentication is ready before attempting to load credentials
-      if (!authService.isSafelyAuthenticated()) {
+      // Enhanced authentication check with retry logic
+      let authRetries = 0;
+      const maxAuthRetries = 3;
+      const authRetryDelay = 1000; // 1 second
+
+      while (
+        authRetries < maxAuthRetries &&
+        !authService.isSafelyAuthenticated()
+      ) {
         logger.debug(
-          'Authentication not ready yet, attempting to initialize...'
+          `Authentication not ready (attempt ${
+            authRetries + 1
+          }/${maxAuthRetries}) - waiting for initialization`
         );
-
-        // Wait a bit for authentication to be ready
-        await new Promise((resolve) => setTimeout(resolve, 500));
-
-        if (!authService.isSafelyAuthenticated()) {
-          logger.warn(
-            'Authentication still not ready - proceeding without auth (may use fallback)'
-          );
-        }
+        await new Promise((resolve) =>
+          setTimeout(resolve, authRetryDelay * (authRetries + 1))
+        );
+        authRetries++;
       }
+
+      if (!authService.isSafelyAuthenticated()) {
+        logger.warn(
+          'Authentication not ready after retries - proceeding with fallback mode'
+        );
+        // Still try to load credentials for local testing/fallback
+      }
+
       // Load semua credentials secara paralel untuk performa yang lebih baik
       // Use refreshSecret to bypass any cached null values
       const [speechKey, speechRegion, speechEndpoint] = await Promise.all([
@@ -268,12 +280,20 @@ async function loadAzureSpeechCredentials(): Promise<boolean> {
         frontendKeyVaultService.refreshSecret('azure-speech-service-endpoint'),
       ]);
 
-      // Validate credentials - check for meaningful values, not just existence
+      // Enhanced validation with more detailed checks
       const validKey =
         speechKey &&
         speechKey.trim() !== '' &&
-        !speechKey.includes('your-speech-service-key-here');
-      const validRegion = speechRegion && speechRegion.trim() !== '';
+        speechKey.length > 10 && // Basic length check for Azure keys
+        !speechKey.includes('your-speech-service-key-here') &&
+        !speechKey.includes('placeholder') &&
+        !speechKey.includes('xxx');
+
+      const validRegion =
+        speechRegion &&
+        speechRegion.trim() !== '' &&
+        speechRegion.length > 2 && // Basic length check
+        /^[a-z0-9]+$/.test(speechRegion); // Region format validation
 
       if (!validKey || !validRegion) {
         logger.warn('Invalid or missing Azure Speech Service credentials', {
@@ -281,6 +301,8 @@ async function loadAzureSpeechCredentials(): Promise<boolean> {
           hasRegion: !!speechRegion,
           keyValid: validKey,
           regionValid: validRegion,
+          keyLength: speechKey?.length || 0,
+          regionLength: speechRegion?.length || 0,
         });
         credentialsLoadPromise = null; // Allow retry on next call
         return false;
@@ -291,8 +313,13 @@ async function loadAzureSpeechCredentials(): Promise<boolean> {
       AZURE_SPEECH_ENDPOINT = speechEndpoint; // Optional, bisa null
 
       credentialsLoaded = true;
-      logger.debug(
-        'Azure Speech Service credentials loaded and cached successfully'
+      logger.info(
+        'Azure Speech Service credentials loaded and validated successfully',
+        {
+          region: speechRegion,
+          hasEndpoint: !!speechEndpoint,
+          keyLength: speechKey.length,
+        }
       );
 
       return true;
@@ -335,10 +362,55 @@ async function initializeSynthesizer(): Promise<SpeechSDK.SpeechSynthesizer | nu
     }
     return null;
   }
-
   try {
+    // Enhanced validation to prevent initialization with placeholder/invalid keys
+    const hasValidKey =
+      AZURE_SPEECH_KEY &&
+      AZURE_SPEECH_KEY.trim() !== '' &&
+      AZURE_SPEECH_KEY.length > 10 &&
+      !AZURE_SPEECH_KEY.includes('your-speech-service-key-here') &&
+      !AZURE_SPEECH_KEY.includes('placeholder') &&
+      !AZURE_SPEECH_KEY.includes('xxx');
+
+    const hasValidRegion =
+      AZURE_SPEECH_REGION &&
+      AZURE_SPEECH_REGION.trim() !== '' &&
+      AZURE_SPEECH_REGION.length > 2 &&
+      /^[a-z0-9]+$/.test(AZURE_SPEECH_REGION);
+
+    if (!credentialsSuccess || !hasValidKey || !hasValidRegion) {
+      logger.warn(
+        'Azure Speech configuration not available or invalid, will use fallback',
+        {
+          credentialsSuccess,
+          hasValidKey,
+          hasValidRegion,
+          keyLength: AZURE_SPEECH_KEY?.length || 0,
+          region: AZURE_SPEECH_REGION?.substring(0, 3) + '***' || 'null',
+        }
+      );
+      // Clear any existing synthesizer since credentials are invalid
+      if (synthesizer) {
+        try {
+          synthesizer.close();
+        } catch {
+          // Silent cleanup
+        }
+        synthesizer = null;
+      }
+      return null;
+    }
+
     // Log initialization without sensitive details
-    logger.debug('Initializing Azure Speech Synthesizer');
+    logger.info(
+      'Initializing Azure Speech Synthesizer with validated credentials',
+      {
+        voiceName: VOICE_NAME,
+        language: VOICE_LANGUAGE,
+        region: AZURE_SPEECH_REGION,
+        hasEndpoint: !!AZURE_SPEECH_ENDPOINT,
+      }
+    );
 
     // Create speech config dengan Key Vault credentials
     const speechConfig = AZURE_SPEECH_ENDPOINT
@@ -349,7 +421,9 @@ async function initializeSynthesizer(): Promise<SpeechSDK.SpeechSynthesizer | nu
       : SpeechSDK.SpeechConfig.fromSubscription(
           AZURE_SPEECH_KEY!,
           AZURE_SPEECH_REGION!
-        ); // Configure untuk kualitas audio terbaik dan kompatibilitas browser
+        );
+
+    // Configure untuk kualitas audio terbaik dan kompatibilitas browser
     speechConfig.speechSynthesisOutputFormat =
       SpeechSDK.SpeechSynthesisOutputFormat.Audio24Khz48KBitRateMonoMp3;
 
@@ -358,21 +432,30 @@ async function initializeSynthesizer(): Promise<SpeechSDK.SpeechSynthesizer | nu
     speechConfig.speechSynthesisLanguage = VOICE_LANGUAGE;
 
     // Add connection resilience settings - menggunakan property yang tersedia
-    speechConfig.setProperty('SpeechServiceConnection_SendTimeoutMs', '10000');
-    speechConfig.setProperty('SpeechServiceConnection_ReadTimeoutMs', '10000');
+    speechConfig.setProperty('SpeechServiceConnection_SendTimeoutMs', '15000');
+    speechConfig.setProperty('SpeechServiceConnection_ReadTimeoutMs', '15000');
+
+    // Add retry settings
+    speechConfig.setProperty('SpeechServiceConnection_MaxRetryCount', '3');
+    speechConfig.setProperty(
+      'SpeechServiceConnection_ReconnectTimeoutMs',
+      '5000'
+    );
 
     // Menggunakan konfigurasi audio yang lebih kompatibel dengan browser
     const audioConfig = SpeechSDK.AudioConfig.fromDefaultSpeakerOutput();
-    logger.debug('Audio configuration created', {
+
+    logger.debug('Speech configuration created', {
       voiceName: VOICE_NAME,
       language: VOICE_LANGUAGE,
       outputFormat: 'Audio24Khz48KBitRateMonoMp3',
       isMultilingualVoice: VOICE_NAME.includes('DragonHDLatest'),
+      hasCustomEndpoint: !!AZURE_SPEECH_ENDPOINT,
     });
 
+    // Close existing synthesizer sebelum membuat yang baru
     if (synthesizer) {
       try {
-        // Close existing synthesizer sebelum membuat yang baru
         synthesizer.close();
       } catch {
         // Silent cleanup - non-critical error
@@ -381,10 +464,21 @@ async function initializeSynthesizer(): Promise<SpeechSDK.SpeechSynthesizer | nu
     }
 
     synthesizer = new SpeechSDK.SpeechSynthesizer(speechConfig, audioConfig);
-    logger.debug('Azure Speech Synthesizer initialized successfully');
+    logger.info('✅ Azure Speech Synthesizer initialized successfully');
     return synthesizer;
   } catch (error: unknown) {
-    logger.error('Failed to initialize Azure Speech Synthesizer', error);
+    logger.error('❌ Failed to initialize Azure Speech Synthesizer', error);
+
+    // Clean up on error
+    if (synthesizer) {
+      try {
+        synthesizer.close();
+      } catch {
+        // Silent cleanup
+      }
+      synthesizer = null;
+    }
+
     return null;
   }
 }
@@ -817,56 +911,214 @@ export function stopAzureTTS(): void {
 }
 
 /**
+ * Test function untuk debugging TTS di browser console
+ * Call this from browser console: await testTTSBasic()
+ */
+export async function testTTSBasic(): Promise<void> {
+  try {
+    logger.info('🧪 Starting basic TTS test...');
+
+    // Check audio context
+    const audioCtx = getAudioContext();
+    logger.info('AudioContext state:', audioCtx.state);
+
+    // Test simple text
+    const testText = 'Halo, ini adalah tes suara untuk VirPal';
+    logger.info('Testing with text:', testText);
+
+    // Test Azure TTS with default options
+    await playAzureTTSWithOptions(testText, DEFAULT_VOICE_OPTIONS);
+
+    logger.info('✅ Basic TTS test completed successfully');
+  } catch (error) {
+    logger.error('❌ Basic TTS test failed:', error);
+    throw error;
+  }
+}
+
+/**
+ * Test function untuk credential loading
+ * Call this from browser console: await testTTSCredentials()
+ */
+export async function testTTSCredentials(): Promise<boolean> {
+  try {
+    logger.info('🔑 Testing TTS credentials...');
+
+    // Reset credentials for fresh test
+    credentialsLoaded = false;
+    credentialsLoadPromise = null;
+
+    const result = await loadAzureSpeechCredentials();
+
+    logger.info('Credentials test result:', {
+      success: result,
+      hasKey: !!AZURE_SPEECH_KEY,
+      hasRegion: !!AZURE_SPEECH_REGION,
+      hasEndpoint: !!AZURE_SPEECH_ENDPOINT,
+      keyLength: AZURE_SPEECH_KEY?.length || 0,
+      region: AZURE_SPEECH_REGION || 'null',
+    });
+
+    return result;
+  } catch (error) {
+    logger.error('❌ Credentials test failed:', error);
+    return false;
+  }
+}
+
+/**
+ * Test different voice presets
+ * Call this from browser console: await testTTSVoicePresets()
+ */
+export async function testTTSVoicePresets(): Promise<void> {
+  try {
+    logger.info('🎵 Testing TTS voice presets...');
+
+    const testTexts = [
+      {
+        text: 'Tenang dan santai',
+        preset: 'calm' as keyof typeof VOICE_PRESETS,
+      },
+      {
+        text: 'Semangat dan optimis',
+        preset: 'encouraging' as keyof typeof VOICE_PRESETS,
+      },
+      {
+        text: 'Saya memahami perasaan Anda',
+        preset: 'empathetic' as keyof typeof VOICE_PRESETS,
+      },
+      {
+        text: 'Berikut adalah informasi yang akurat',
+        preset: 'professional' as keyof typeof VOICE_PRESETS,
+      },
+    ];
+    for (const { text, preset } of testTexts) {
+      logger.info(`Testing ${preset} preset: "${text}"`);
+
+      let voiceOptions: VoiceOptions;
+      switch (preset) {
+        case 'calm':
+          voiceOptions = VOICE_PRESETS.calm;
+          break;
+        case 'encouraging':
+          voiceOptions = VOICE_PRESETS.encouraging;
+          break;
+        case 'empathetic':
+          voiceOptions = VOICE_PRESETS.empathetic;
+          break;
+        case 'professional':
+          voiceOptions = VOICE_PRESETS.professional;
+          break;
+        default:
+          voiceOptions = DEFAULT_VOICE_OPTIONS;
+      }
+
+      await playAzureTTSWithOptions(text, voiceOptions);
+      await new Promise((resolve) => setTimeout(resolve, 2000)); // Wait between tests
+    }
+
+    logger.info('✅ Voice presets test completed');
+  } catch (error) {
+    logger.error('❌ Voice presets test failed:', error);
+    throw error;
+  }
+}
+
+// Make test functions available globally for console access
+if (typeof window !== 'undefined') {
+  interface WindowWithTTSTests extends Window {
+    testTTSBasic?: () => Promise<void>;
+    testTTSCredentials?: () => Promise<boolean>;
+    testTTSVoicePresets?: () => Promise<void>;
+  }
+
+  const windowWithTests = window as WindowWithTTSTests;
+  windowWithTests.testTTSBasic = testTTSBasic;
+  windowWithTests.testTTSCredentials = testTTSCredentials;
+  windowWithTests.testTTSVoicePresets = testTTSVoicePresets;
+}
+
+/**
  * Initialize TTS service - loads credentials and prepares synthesizer
  * Call this once during application startup
- * Includes retry logic for authentication timing issues
+ * Includes enhanced retry logic and better error handling
  */
 export async function initializeTTSService(): Promise<boolean> {
   try {
-    logger.debug('Initializing TTS Service');
+    logger.info('🎤 Initializing TTS Service with enhanced error handling');
+
+    // Check basic browser support first
+    if (!('speechSynthesis' in window) && typeof SpeechSDK === 'undefined') {
+      logger.error('❌ Neither Azure Speech SDK nor Web Speech API available');
+      return false;
+    }
 
     // Retry logic untuk mengatasi timing issue dengan MSAL initialization
     let success = false;
     let retryCount = 0;
-    const maxRetries = 3;
-    const retryDelay = 1000; // 1 second
+    const maxRetries = 5; // Increased retries
+    const baseRetryDelay = 1000; // 1 second base delay
 
     while (!success && retryCount < maxRetries) {
       if (retryCount > 0) {
+        const delay = baseRetryDelay * Math.pow(2, retryCount - 1); // Exponential backoff
         logger.debug(
-          `Retrying TTS initialization (attempt ${
+          `🔄 Retrying TTS initialization (attempt ${
             retryCount + 1
-          }/${maxRetries})`
+          }/${maxRetries}) after ${delay}ms`
         );
-        // Wait before retry
-        await new Promise((resolve) =>
-          setTimeout(resolve, retryDelay * retryCount)
-        );
+        await new Promise((resolve) => setTimeout(resolve, delay));
       }
 
-      success = await loadAzureSpeechCredentials();
-      retryCount++;
+      try {
+        success = await loadAzureSpeechCredentials();
+        retryCount++;
 
-      if (!success && retryCount < maxRetries) {
-        logger.debug('TTS initialization failed, will retry...');
+        if (!success && retryCount < maxRetries) {
+          logger.debug('💤 TTS credential loading failed, will retry...');
+
+          // Clear cache before retry to ensure fresh attempt
+          credentialsLoaded = false;
+          credentialsLoadPromise = null;
+        }
+      } catch (error) {
+        logger.warn(
+          `❌ TTS initialization attempt ${retryCount + 1} failed:`,
+          error
+        );
+        retryCount++;
+
+        // Clear cache before retry
+        credentialsLoaded = false;
+        credentialsLoadPromise = null;
       }
     }
 
     if (success) {
       // Pre-initialize synthesizer untuk performa yang lebih baik
       synthesizer = await initializeSynthesizer();
-      logger.debug('TTS Service initialized successfully');
-      console.log('✅ Azure Speech Service ready for Text-to-Speech');
-    } else {
-      logger.debug(
-        'TTS Service initialized without Azure Speech (fallback mode)'
-      );
-      console.log('ℹ️ TTS Service running in fallback mode (Web Speech API)');
+      if (synthesizer) {
+        logger.info('✅ Azure Speech Service initialized successfully');
+        console.log('🎵 Azure Speech Service ready with Brian Neural Voice');
+      } else {
+        logger.warn(
+          '⚠️ Azure Speech credentials loaded but synthesizer initialization failed'
+        );
+        success = false;
+      }
     }
+
+    if (!success) {
+      logger.info(
+        'ℹ️ TTS Service initialized in fallback mode (Web Speech API)'
+      );
+      console.log('🔄 TTS Service running with Web Speech API fallback');
+    }
+
     return success;
   } catch (error) {
-    logger.error('Failed to initialize TTS Service');
-    console.error('❌ TTS Service initialization failed:', error);
+    logger.error('❌ Critical error during TTS Service initialization:', error);
+    console.error('💥 TTS Service initialization failed:', error);
     return false;
   }
 }
