@@ -33,8 +33,17 @@ function ensureDirectoriesExist() {
 function setupESModules() {
   const packageJsonPath = path.join(__dirname, '..', 'dist', 'package.json');
   const esmPackage = {
+    name: 'virpal-app-functions',
+    version: '1.0.0',
+    description: 'Azure Functions for VirPal App',
     type: 'module',
     main: 'index.mjs',
+    engines: {
+      node: '>=18',
+    },
+    dependencies: {
+      '@azure/functions': '^4.0.0',
+    },
   };
 
   if (
@@ -365,6 +374,38 @@ function copyHostJson() {
   }
 }
 
+// === UPDATE API PACKAGE.JSON ===
+function updateApiPackageJson() {
+  const apiPackageJsonPath = path.join(__dirname, '..', 'api', 'package.json');
+  const apiPackage = {
+    name: 'virpal-app-functions',
+    version: '1.0.0',
+    description: 'Azure Functions for VirPal App',
+    type: 'module',
+    main: 'index.mjs',
+    engines: {
+      node: '>=18',
+    },
+    dependencies: {
+      '@azure/functions': '^4.0.0',
+    },
+  };
+
+  const apiDir = path.join(__dirname, '..', 'api');
+  if (!fs.existsSync(apiDir)) {
+    fs.mkdirSync(apiDir, { recursive: true });
+  }
+
+  if (
+    !fs.existsSync(apiPackageJsonPath) ||
+    JSON.stringify(JSON.parse(fs.readFileSync(apiPackageJsonPath, 'utf8'))) !==
+      JSON.stringify(apiPackage)
+  ) {
+    fs.writeFileSync(apiPackageJsonPath, JSON.stringify(apiPackage, null, 2));
+    changes.push('Updated api/package.json with full function configuration');
+  }
+}
+
 // === MAIN EXECUTION ===
 console.log(
   '🔧 Setting up Azure Functions build (ES Modules with .mjs only)...'
@@ -377,6 +418,7 @@ setupServiceFiles();
 fixImportSyntax();
 setupCORS();
 copyHostJson();
+updateApiPackageJson();
 
 if (changes.length > 0) {
   console.log('✅ The following changes were made:');

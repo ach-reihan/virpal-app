@@ -1,4 +1,13 @@
 {
+  "name": "virpal-app-functions",
+  "version": "1.0.0",
+  "description": "Azure Functions for VirPal App",
   "type": "module",
-  "main": "index.mjs"
+  "main": "index.mjs",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@azure/functions": "^4.0.0"
+  }
 }
