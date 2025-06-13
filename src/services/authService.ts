@@ -104,7 +104,7 @@ export interface ExtendedAuthResult extends AuthenticationResult {
 }
 
 class AuthenticationService {
-  private msalInstance: PublicClientApplication;
+  private msalInstance: PublicClientApplication | null;
   private currentAccount: AccountInfo | null = null;
   private tokenCache = new Map<string, { token: string; expiry: number }>();
   private lastAuthState: boolean | null = null; // Track last authentication state to reduce logging
@@ -120,12 +120,16 @@ class AuthenticationService {
   private isInitialized = false;
   private initializationPromise: Promise<void>;
   private redirectHandled = false; // Flag to ensure handleRedirectResponse is called only once
+
   constructor() {
     // Validasi konfigurasi sebelum inisialisasi
     if (!validateMsalConfig()) {
-      throw new Error(
-        'Invalid MSAL configuration. Please check environment variables.'
+      logger.warn(
+        'MSAL configuration not valid - authentication will be disabled'
       );
+      this.msalInstance = null;
+      this.initializationPromise = Promise.resolve();
+      return;
     }
 
     // Inisialisasi MSAL
@@ -136,13 +140,17 @@ class AuthenticationService {
       return Promise.resolve();
     });
   }
-
   private async initializeMsal(): Promise<void> {
     // Prevent multiple initialization attempts
     if (this.isInitialized) {
       return;
     }
     try {
+      // Check if msalInstance is available
+      if (!this.msalInstance) {
+        throw new Error('MSAL instance not available');
+      }
+
       // Initialize MSAL first
       await this.msalInstance.initialize();
 
@@ -153,7 +161,7 @@ class AuthenticationService {
       await this.initializeAccount();
     } catch (err) {
       this.isInitialized = false;
-      logger.error('MSAL initialization failed');
+      logger.error('MSAL initialization failed:', err);
       throw err;
     }
   }
@@ -163,19 +171,21 @@ class AuthenticationService {
   private async initializeAccount(): Promise<void> {
     try {
       // msalInstance sudah diinisialisasi di constructor
-      const accounts = this.msalInstance.getAllAccounts();
+      const msalInstance = this.getMsalInstanceSafe();
+      const accounts = msalInstance.getAllAccounts();
 
       if (accounts.length > 0) {
         // Pastikan account[0] tidak undefined sebelum menggunakannya
         const firstAccount = accounts[0];
         if (firstAccount) {
           this.currentAccount = firstAccount;
-          this.msalInstance.setActiveAccount(firstAccount);
+          msalInstance.setActiveAccount(firstAccount);
           // Skip token validation during initialization to avoid CORS errors
           // Token validation will happen when user explicitly requests a token
         }
       }
-    } catch (error) {
+    } catch (err) {
+      logger.error('Failed to initialize account:', err);
       this.clearAuthState();
     }
   }
@@ -194,13 +204,14 @@ class AuthenticationService {
 
       // Use the base login request without modifying prompt
       // The prompt is already configured in the loginRequest
-      const response = await this.msalInstance.loginPopup(loginRequest);
+      const msalInstance = this.getMsalInstanceSafe();
+      const response = await msalInstance.loginPopup(loginRequest);
 
       logger.debug('Authentication popup completed successfully');
 
       if (response.account) {
         this.currentAccount = response.account;
-        this.msalInstance.setActiveAccount(response.account);
+        msalInstance.setActiveAccount(response.account);
         this.updateTokenCache(response);
         this.metrics.successfulLogins++;
 
@@ -230,11 +241,12 @@ class AuthenticationService {
           await new Promise((resolve) => setTimeout(resolve, 500));
 
           // Check if authentication actually succeeded despite the popup error
-          const accounts = this.msalInstance.getAllAccounts();
+          const msalInstance = this.getMsalInstanceSafe();
+          const accounts = msalInstance.getAllAccounts();
 
           if (accounts.length > 0 && accounts[0]) {
             this.currentAccount = accounts[0];
-            this.msalInstance.setActiveAccount(accounts[0]);
+            msalInstance.setActiveAccount(accounts[0]);
             this.metrics.successfulLogins++;
 
             logger.info(
@@ -287,7 +299,8 @@ class AuthenticationService {
         redirectUri: window.location.origin,
       };
 
-      await this.msalInstance.loginRedirect(redirectRequest);
+      const msalInstance = this.getMsalInstanceSafe();
+      await msalInstance.loginRedirect(redirectRequest);
     } catch (error) {
       this.handleAuthError(error);
       throw error;
@@ -315,9 +328,10 @@ class AuthenticationService {
               )
             ),
           ]);
-        } catch (error) {
+        } catch (err) {
           logger.warn(
-            'MSAL initialization timeout, skipping redirect handling'
+            'MSAL initialization timeout, skipping redirect handling:',
+            err
           );
           // Mark as handled to prevent retry loops
           this.redirectHandled = true;
@@ -328,8 +342,9 @@ class AuthenticationService {
       // Mark as handled before processing to prevent multiple calls
       this.redirectHandled = true;
       // Handle redirect dengan timeout
+      const msalInstance = this.getMsalInstanceSafe();
       const response = await Promise.race([
-        this.msalInstance.handleRedirectPromise(),
+        msalInstance.handleRedirectPromise(),
         // Timeout untuk handleRedirectPromise
         new Promise<null>((resolve) =>
           setTimeout(() => {
@@ -340,13 +355,13 @@ class AuthenticationService {
 
       if (response && response.account) {
         this.currentAccount = response.account;
-        this.msalInstance.setActiveAccount(response.account);
+        msalInstance.setActiveAccount(response.account);
         this.updateTokenCache(response);
         this.metrics.successfulLogins++;
       }
       return response;
     } catch (error) {
-      logger.error('Redirect response handling failed');
+      logger.error('Redirect response handling failed:', error);
       // Don't throw error to prevent infinite loading - just log and return null
       this.handleAuthError(error);
       return null;
@@ -380,9 +395,9 @@ class AuthenticationService {
         account: this.currentAccount,
         forceRefresh,
       };
-
       logger.debug('Attempting silent token acquisition');
-      const response = await this.msalInstance.acquireTokenSilent(
+      const msalInstance = this.getMsalInstanceSafe();
+      const response = await msalInstance.acquireTokenSilent(
         silentTokenRequest
       );
 
@@ -399,9 +414,11 @@ class AuthenticationService {
       throw new Error('Failed to acquire access token');
     } catch (error) {
       this.metrics.silentTokenFailures++;
-
       const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-      const errorCode = (error as any)?.errorCode;
+      const errorCode =
+        error && typeof error === 'object' && 'errorCode' in error
+          ? (error as { errorCode: string }).errorCode
+          : undefined;
       const errorName = error instanceof Error ? error.name : 'Unknown';
 
       logger.error('Silent token acquisition failed', {
@@ -416,7 +433,8 @@ class AuthenticationService {
           logger.debug(
             'Attempting popup token acquisition due to interaction required'
           );
-          const popupResponse = await this.msalInstance.acquireTokenPopup({
+          const msalInstance = this.getMsalInstanceSafe();
+          const popupResponse = await msalInstance.acquireTokenPopup({
             ...loginRequest,
             account: this.currentAccount,
           });
@@ -446,11 +464,10 @@ class AuthenticationService {
       const logoutRequestWithAccount: EndSessionRequest = {
         ...logoutRequest,
         account: this.currentAccount,
-      };
-
-      // Clear local state
+      }; // Clear local state
       this.clearAuthState(); // Perform logout
-      await this.msalInstance.logoutPopup(logoutRequestWithAccount);
+      const msalInstance = this.getMsalInstanceSafe();
+      await msalInstance.logoutPopup(logoutRequestWithAccount);
     } catch (error) {
       // Clear local state even if logout fails
       this.clearAuthState();
@@ -501,17 +518,31 @@ class AuthenticationService {
     // First check if we have current account set
     if (!this.currentAccount) {
       // If no current account, check MSAL accounts and set active account
-      const msalAccounts = this.msalInstance.getAllAccounts();
-      if (msalAccounts.length > 0 && msalAccounts[0]) {
-        this.currentAccount = msalAccounts[0];
-        this.msalInstance.setActiveAccount(msalAccounts[0]);
-        logger.debug('Active account set from available MSAL accounts');
+      try {
+        const msalInstance = this.getMsalInstanceSafe();
+        const msalAccounts = msalInstance.getAllAccounts();
+        if (msalAccounts.length > 0 && msalAccounts[0]) {
+          this.currentAccount = msalAccounts[0];
+          msalInstance.setActiveAccount(msalAccounts[0]);
+          logger.debug('Active account set from available MSAL accounts');
+        }
+      } catch (error) {
+        logger.debug('Failed to get MSAL accounts:', error);
+        return false;
       }
     }
 
     const hasCurrentAccount = !!this.currentAccount;
-    const msalAccounts = this.msalInstance.getAllAccounts();
-    const hasMsalAccounts = msalAccounts.length > 0;
+    let hasMsalAccounts = false;
+
+    try {
+      const msalInstance = this.getMsalInstanceSafe();
+      const msalAccounts = msalInstance.getAllAccounts();
+      hasMsalAccounts = msalAccounts.length > 0;
+    } catch (error) {
+      logger.debug('Failed to check MSAL accounts:', error);
+    }
+
     const isAuthenticated = hasCurrentAccount && hasMsalAccounts;
 
     // Only log authentication status changes to reduce noise
@@ -582,10 +613,10 @@ class AuthenticationService {
    */
   async getTokenInfo(): Promise<TokenInfo | null> {
     if (!this.currentAccount) return null;
-
     try {
       const token = await this.getAccessToken();
-      const tokenResponse = await this.msalInstance.acquireTokenSilent({
+      const msalInstance = this.getMsalInstanceSafe();
+      const tokenResponse = await msalInstance.acquireTokenSilent({
         ...silentRequest,
         account: this.currentAccount,
       });
@@ -633,7 +664,12 @@ class AuthenticationService {
     this.redirectHandled = false; // Reset redirect handling for fresh session
 
     // Clear MSAL cache - setActiveAccount to null sebagai pengganti removeAccount
-    this.msalInstance.setActiveAccount(null);
+    try {
+      const msalInstance = this.getMsalInstanceSafe();
+      msalInstance.setActiveAccount(null);
+    } catch (error) {
+      logger.debug('Failed to clear MSAL active account:', error);
+    }
   }
 
   /**
@@ -701,11 +737,19 @@ class AuthenticationService {
   getInitializationStatus(): boolean {
     return this.isInitialized;
   }
-
   /**
    * Get the MSAL instance untuk penggunaan dengan MsalProvider
    */
   getMsalInstance(): PublicClientApplication {
+    if (!this.msalInstance) {
+      throw new Error('MSAL is not available - authentication is disabled');
+    }
+    return this.msalInstance;
+  } // Get MSAL instance with null check
+  private getMsalInstanceSafe(): PublicClientApplication {
+    if (!this.msalInstance) {
+      throw new Error('MSAL is not available - authentication is disabled');
+    }
     return this.msalInstance;
   }
 }

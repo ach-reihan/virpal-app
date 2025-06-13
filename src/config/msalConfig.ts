@@ -33,34 +33,46 @@ const authority = `https://${tenantDomain}/${tenantName}.onmicrosoft.com/`;ntra 
  * - Cache optimization
  */
 
-import type { Configuration, PopupRequest, SilentRequest, } from '@azure/msal-browser';
+import type {
+  Configuration,
+  PopupRequest,
+  SilentRequest,
+} from '@azure/msal-browser';
 import { LogLevel } from '@azure/msal-browser';
 import { logger } from '../utils/logger';
 
 // Environment variables dengan fallback values
-const clientId = import.meta.env['VITE_MSAL_CLIENT_ID'] || '';
-const tenantName = import.meta.env['VITE_TENANT_NAME'] || '';
-const tenantDomain = import.meta.env['VITE_TENANT_DOMAIN'] || '';
-const userFlowName = import.meta.env['VITE_USER_FLOW_NAME'] || '';
-const backendScope = import.meta.env['VITE_BACKEND_SCOPE'] || '';
+const clientId = import.meta.env['VITE_MSAL_CLIENT_ID'] || 'demo-client-id';
+const tenantName = import.meta.env['VITE_TENANT_NAME'] || 'demo-tenant';
+const tenantDomain =
+  import.meta.env['VITE_TENANT_DOMAIN'] || 'demo.ciamlogin.com';
+const userFlowName =
+  import.meta.env['VITE_USER_FLOW_NAME'] || 'B2C_1_signupsignin';
+const backendScope =
+  import.meta.env['VITE_BACKEND_SCOPE'] ||
+  'https://demo.onmicrosoft.com/api/access';
 
-// Validasi environment variables
-if (
-  !clientId ||
-  !tenantName ||
-  !tenantDomain ||
-  !userFlowName ||
-  !backendScope
-) {
-  logger.error('Missing required MSAL environment variables');
-  logger.error('Configuration validation failed', {
-    hasClientId: !!clientId,
-    hasTenantName: !!tenantName,
-    hasTenantDomain: !!tenantDomain,
-    hasUserFlowName: !!userFlowName,
-    hasBackendScope: !!backendScope,
+// Variabel untuk mengecek apakah konfigurasi valid
+export const isMsalConfigured = !!(
+  import.meta.env['VITE_MSAL_CLIENT_ID'] &&
+  import.meta.env['VITE_TENANT_NAME'] &&
+  import.meta.env['VITE_TENANT_DOMAIN'] &&
+  import.meta.env['VITE_USER_FLOW_NAME'] &&
+  import.meta.env['VITE_BACKEND_SCOPE']
+);
+
+// Log warning jika konfigurasi tidak lengkap
+if (!isMsalConfigured) {
+  logger.warn(
+    'MSAL environment variables not configured - running in demo mode'
+  );
+  logger.warn('Configuration status', {
+    hasClientId: !!import.meta.env['VITE_MSAL_CLIENT_ID'],
+    hasTenantName: !!import.meta.env['VITE_TENANT_NAME'],
+    hasTenantDomain: !!import.meta.env['VITE_TENANT_DOMAIN'],
+    hasUserFlowName: !!import.meta.env['VITE_USER_FLOW_NAME'],
+    hasBackendScope: !!import.meta.env['VITE_BACKEND_SCOPE'],
   });
-  throw new Error('Missing required MSAL configuration');
 }
 
 // Authority URL untuk Azure Entra External ID (CIAM)
@@ -186,37 +198,7 @@ export const navigationClient = {
  * Helper function untuk validasi konfigurasi
  */
 export const validateMsalConfig = (): boolean => {
-  try {
-    const requiredFields = {
-      clientId,
-      tenantName,
-      userFlowName,
-      backendScope,
-    };
-
-    for (const [key, value] of Object.entries(requiredFields)) {
-      if (!value) {
-        logger.error(`Missing required MSAL config field: ${key}`);
-        return false;
-      }
-    } // Validasi format authority URL untuk CIAM
-    const url = new URL(authority);
-    if (!url.hostname.includes('.ciamlogin.com')) {
-      logger.error('Invalid authority URL format for CIAM');
-      return false;
-    }
-
-    // Verify authority doesn't include the user flow (should be in extraQueryParameters)
-    if (url.pathname.includes(userFlowName)) {
-      logger.error('User flow should not be in authority URL for CIAM');
-      return false;
-    }
-
-    return true;
-  } catch (error) {
-    logger.error('MSAL config validation error');
-    return false;
-  }
+  return isMsalConfigured;
 };
 
 /**
