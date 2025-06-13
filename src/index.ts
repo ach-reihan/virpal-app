@@ -20,9 +20,10 @@
 import pkg from '@azure/functions';
 const { app } = pkg;
 
-// Import functions to register them
+// Import functions to register them with the Azure Functions runtime
 import './functions/chat-completion.js';
 import './functions/get-secret.js';
+import './functions/health.js';
 
 app.setup({
   enableHttpStream: true,

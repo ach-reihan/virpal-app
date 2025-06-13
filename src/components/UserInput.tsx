@@ -18,6 +18,7 @@
  */
 
 import React, { useState } from 'react';
+import { unlockAudioContext } from '../services/azureSpeechService';
 import { guestLimitService } from '../services/guestLimitService';
 
 interface UserInputProps {
@@ -62,10 +63,12 @@ const UserInput: React.FC<UserInputProps> = ({
         return 'Ketik pesanmu di sini...';
     }
   };
-
   const handleSubmit = (e?: React.FormEvent<HTMLFormElement>) => {
     if (e) e.preventDefault();
     if (!inputText.trim() || isSending) return;
+
+    // Unlock audio context on user interaction to enable TTS playback
+    unlockAudioContext();
 
     // Check guest limitations
     if (!canSendMessage) {

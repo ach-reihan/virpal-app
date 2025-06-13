@@ -285,7 +285,7 @@ const GamblingRiskAssessment: React.FC<GamblingRiskAssessmentProps> = ({
       return '#fef2f2'; // red-50
     };
     return (
-      <div className="max-w-4xl mx-auto p-6 space-y-6 risk-assessment-container">
+      <div className="max-w-4xl mx-auto p-6 space-y-6 overflow-y-auto h-full risk-assessment-container">
         <div className="text-center">
           <h2
             className="text-2xl font-bold mb-2"

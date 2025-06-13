@@ -18,6 +18,7 @@
  */
 
 import React from 'react';
+import { unlockAudioContext } from '../services/azureSpeechService';
 import { logger } from '../utils/logger';
 
 interface TTSControlsProps {
@@ -67,8 +68,10 @@ const TTSControls: React.FC<TTSControlsProps> = ({
     if (isEnabled) return 'TTS enabled - click to disable';
     return 'TTS disabled - click to enable';
   };
-
   const handleClick = () => {
+    // Unlock audio context on user interaction to handle browser autoplay policies
+    unlockAudioContext();
+
     if (!isAuthenticated) {
       if (onLoginClick) {
         onLoginClick();
@@ -83,11 +86,14 @@ const TTSControls: React.FC<TTSControlsProps> = ({
     }
   };
   const handleRetryInit = async () => {
+    // Unlock audio context on user interaction
+    unlockAudioContext();
+
     if (onInitialize) {
       try {
         await onInitialize();
       } catch (error) {
-        logger.error('Manual TTS initialization failed');
+        logger.error('Manual TTS initialization failed', error);
       }
     }
   };

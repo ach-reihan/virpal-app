@@ -37,10 +37,19 @@
  *   azure-speech-service-region: Your Azure region (e.g., southeastasia)
  *   azure-speech-service-endpoint: (Optional) Custom endpoint URL
  * - Authentication via Managed Identity (no hardcoded credentials)
- *  * Usage:
+ * * Usage:
  * ```typescript
- * import { playAzureTTS, stopAzureTTS, unlockAudioContext, initializeTTSService } from './services/azureSpeechService';
- * import { logger } from '../utils/logger';
+ * import {
+ *   playAzureTTS,
+ *   playAzureTTSWithOptions,
+ *   playCalm,
+ *   playEncouraging,
+ *   stopAzureTTS,
+ *   unlockAudioContext,
+ *   initializeTTSService,
+ *   VOICE_PRESETS,
+ *   createVoiceOptions
+ * } from './services/azureSpeechService';
  *
  * // Initialize TTS service (loads credentials from Key Vault)
  * await initializeTTSService();
@@ -48,21 +57,118 @@
  * // Initialize audio context on user interaction (e.g., button click)
  * unlockAudioContext();
  *
- * // Play speech
- * playAzureTTS("Hello, how are you today?")
- *   .then(() => logger.debug("Speech completed"))
- *   .catch(() => logger.error("Speech failed"));
+ * // Basic usage
+ * await playAzureTTS("Hello, how are you today?");
+ *
+ * // Custom voice options
+ * await playAzureTTSWithOptions("Take a deep breath and relax", {
+ *   rate: 0.8,      // Slower speech
+ *   pitch: "-5%",   // Lower pitch
+ *   volume: 50,     // Moderate volume
+ *   style: 'friendly'
+ * });
+ *
+ * // Using presets for different emotional contexts
+ * await playCalm("Everything will be okay. You're safe now.");
+ * await playEncouraging("You've got this! Keep moving forward.");
+ * await playEmpathetic("I understand this is difficult for you.");
+ * await playProfessional("Here are some coping strategies you can try.");
+ *
+ * // Create custom validated options
+ * const customOptions = createVoiceOptions({
+ *   rate: 1.2,
+ *   pitch: "+10%",
+ *   style: 'cheerful'
+ * });
+ * await playAzureTTSWithOptions("Great job!", customOptions);
  *
  * // Stop ongoing speech
  * stopAzureTTS();
  * ```
  *
+ * Voice Parameters for Brian:DragonHDLatestNeural:
+ * - Rate: 0.5 - 2.0 (speech speed)
+ * - Pitch: -50% to +50% (voice pitch)
+ * - Volume: 0 - 100 (audio volume)
+ * - Style: 'cheerful', 'sad', 'friendly', 'hopeful'
+ * - StyleDegree: 0.01 - 2.0 (intensity of emotional style)
+ *
  * @see https://learn.microsoft.com/azure/cognitive-services/speech-service/
  */
 
 import * as SpeechSDK from 'microsoft-cognitiveservices-speech-sdk';
-import { frontendKeyVaultService } from './frontendKeyVaultService';
 import { authService } from './authService';
+import { frontendKeyVaultService } from './frontendKeyVaultService';
+
+/**
+ * Voice configuration options for Brian:DragonHDLatestNeural
+ * Supports pitch, speed, volume, and emotional style customization
+ */
+export interface VoiceOptions {
+  /** Speech rate/speed (0.5 - 2.0, default: 1.0) */
+  rate?: number;
+  /** Voice pitch (-50% to +50%, default: "+0%") */
+  pitch?: string;
+  /** Voice volume (0 - 100, default: 50) */
+  volume?: number;
+  /** Voice style for emotional expression (Brian supports limited styles) */
+  style?: 'cheerful' | 'sad' | 'friendly' | 'hopeful';
+  /** Style degree/intensity (0.01 - 2.0, default: 1.0) */
+  styleDegree?: number;
+}
+
+/**
+ * Default voice configuration optimized for mental health assistance
+ * Uses calming and supportive parameters
+ */
+export const DEFAULT_VOICE_OPTIONS: VoiceOptions = {
+  rate: 0.9, // Slightly slower for better comprehension
+  pitch: '+0%', // Natural pitch
+  volume: 60, // Comfortable volume level
+  style: 'friendly', // Warm and approachable tone
+  styleDegree: 1.0, // Natural intensity
+};
+
+/**
+ * Preset voice configurations for different conversation contexts
+ */
+export const VOICE_PRESETS = {
+  /** Calm and supportive for anxiety/stress relief */
+  calm: {
+    rate: 0.8,
+    pitch: '-5%',
+    volume: 55,
+    style: 'friendly',
+    styleDegree: 0.8,
+  } as VoiceOptions,
+
+  /** Encouraging and uplifting for motivation */
+  encouraging: {
+    rate: 1.0,
+    pitch: '+5%',
+    volume: 65,
+    style: 'cheerful',
+    styleDegree: 1.2,
+  } as VoiceOptions,
+
+  /** Empathetic for difficult conversations */
+  empathetic: {
+    rate: 0.85,
+    pitch: '-2%',
+    volume: 50,
+    style: 'sad',
+    styleDegree: 0.6,
+  } as VoiceOptions,
+
+  /** Professional for informational content */
+  professional: {
+    rate: 1.0,
+    pitch: '+0%',
+    volume: 60,
+    style: 'friendly',
+    styleDegree: 0.9,
+  } as VoiceOptions,
+};
 
 // KONFIGURASI - Kredensial diambil secara aman dari Azure Key Vault via Azure Functions
 // Menggunakan frontend service yang memanggil Azure Functions sebagai proxy
@@ -75,8 +181,8 @@ let credentialsLoaded = false;
 let credentialsLoadPromise: Promise<boolean> | null = null;
 
 // Voice configuration - menggunakan voice neural berkualitas tinggi
-const VOICE_NAME = 'en-US-Brian:DragonHDLatestNeural'; // High-quality neural voice
-const VOICE_LANGUAGE = 'id-ID'; // Bahasa untuk voice yang dipilih
+const VOICE_NAME = 'en-US-Brian:DragonHDLatestNeural'; // High-quality multilingual neural voice
+const VOICE_LANGUAGE = 'id-ID'; // Bahasa Indonesia - Brian Dragon HD Latest supports multilingual
 
 let synthesizer: SpeechSDK.SpeechSynthesizer | null = null;
 let audioContext: AudioContext | null = null; // Untuk mengelola AudioContext
@@ -190,8 +296,8 @@ async function loadAzureSpeechCredentials(): Promise<boolean> {
       );
 
       return true;
-    } catch (error) {
-      logger.error('Failed to load Azure Speech Service credentials');
+    } catch (error: unknown) {
+      logger.error('Failed to load Azure Speech Service credentials', error);
       credentialsLoadPromise = null; // Allow retry on next call
       return false;
     }
@@ -243,11 +349,9 @@ async function initializeSynthesizer(): Promise<SpeechSDK.SpeechSynthesizer | nu
       : SpeechSDK.SpeechConfig.fromSubscription(
           AZURE_SPEECH_KEY!,
           AZURE_SPEECH_REGION!
-        );
-
-    // Configure untuk kualitas audio terbaik
+        ); // Configure untuk kualitas audio terbaik dan kompatibilitas browser
     speechConfig.speechSynthesisOutputFormat =
-      SpeechSDK.SpeechSynthesisOutputFormat.Audio24Khz160KBitRateMonoMp3;
+      SpeechSDK.SpeechSynthesisOutputFormat.Audio24Khz48KBitRateMonoMp3;
 
     // Set voice yang dikonfigurasi
     speechConfig.speechSynthesisVoiceName = VOICE_NAME;
@@ -257,13 +361,21 @@ async function initializeSynthesizer(): Promise<SpeechSDK.SpeechSynthesizer | nu
     speechConfig.setProperty('SpeechServiceConnection_SendTimeoutMs', '10000');
     speechConfig.setProperty('SpeechServiceConnection_ReadTimeoutMs', '10000');
 
+    // Menggunakan konfigurasi audio yang lebih kompatibel dengan browser
     const audioConfig = SpeechSDK.AudioConfig.fromDefaultSpeakerOutput();
+    logger.debug('Audio configuration created', {
+      voiceName: VOICE_NAME,
+      language: VOICE_LANGUAGE,
+      outputFormat: 'Audio24Khz48KBitRateMonoMp3',
+      isMultilingualVoice: VOICE_NAME.includes('DragonHDLatest'),
+    });
 
     if (synthesizer) {
       try {
         // Close existing synthesizer sebelum membuat yang baru
         synthesizer.close();
-      } catch (closeError) {
+      } catch {
+        // Silent cleanup - non-critical error
         logger.warn('Error closing previous synthesizer instance');
       }
     }
@@ -271,8 +383,8 @@ async function initializeSynthesizer(): Promise<SpeechSDK.SpeechSynthesizer | nu
     synthesizer = new SpeechSDK.SpeechSynthesizer(speechConfig, audioConfig);
     logger.debug('Azure Speech Synthesizer initialized successfully');
     return synthesizer;
-  } catch (error) {
-    logger.error('Failed to initialize Azure Speech Synthesizer');
+  } catch (error: unknown) {
+    logger.error('Failed to initialize Azure Speech Synthesizer', error);
     return null;
   }
 }
@@ -464,14 +576,214 @@ export async function playAzureTTS(textToSpeak: string): Promise<void> {
             reject(new Error('Speech synthesis failed'));
           }
         },
-        (_: string) => {
+        (errorMessage: string) => {
           const duration = Date.now() - startTime;
-          logger.error('TTS General Error');
+          logger.error('TTS General Error', errorMessage);
           logSpeechMetrics(trimmedText, duration, false, 'Azure SDK error');
           reject(new Error('Speech synthesis failed'));
         }
       );
     });
+  });
+}
+
+/**
+ * Generate SSML (Speech Synthesis Markup Language) for Brian:DragonHDLatestNeural
+ * with customizable pitch, speed, volume, and emotional style
+ */
+function generateSSML(
+  text: string,
+  options: VoiceOptions = DEFAULT_VOICE_OPTIONS
+): string {
+  const {
+    rate = DEFAULT_VOICE_OPTIONS.rate,
+    pitch = DEFAULT_VOICE_OPTIONS.pitch,
+    volume = DEFAULT_VOICE_OPTIONS.volume,
+    style,
+    styleDegree = 1.0,
+  } = options;
+
+  // Escape special XML characters in text
+  const escapedText = text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+  // Build SSML with correct namespace declarations for mstts
+  let ssml = `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xmlns:mstts="https://www.w3.org/2001/mstts" xml:lang="id-ID">`;
+
+  // Voice element with name
+  ssml += `<voice name="${VOICE_NAME}">`;
+
+  // Add style if specified (Brian supports limited emotional styles)
+  if (style) {
+    ssml += `<mstts:express-as style="${style}" styledegree="${styleDegree}">`;
+  }
+
+  // Prosody for pitch, rate, and volume control
+  ssml += `<prosody pitch="${pitch}" rate="${rate}" volume="${volume}">`;
+  ssml += escapedText;
+  ssml += `</prosody>`;
+
+  // Close style tag if used
+  if (style) {
+    ssml += `</mstts:express-as>`;
+  }
+  ssml += `</voice>`;
+  ssml += `</speak>`;
+  logger.debug('Generated SSML with mstts namespace', {
+    hasStyle: !!style,
+    ssmlLength: ssml.length,
+    voiceName: VOICE_NAME,
+    isMultilingualVoice: VOICE_NAME.includes('DragonHDLatest'),
+    targetLanguage: 'id-ID',
+    preview: ssml.substring(0, 150) + '...',
+  });
+
+  return ssml;
+}
+
+/**
+ * Play text as speech using Azure Text-to-Speech with customizable voice options
+ * Supports pitch, speed, volume, and emotional style control for Brian:DragonHDLatestNeural
+ */
+export async function playAzureTTSWithOptions(
+  textToSpeak: string,
+  options: VoiceOptions = DEFAULT_VOICE_OPTIONS
+): Promise<void> {
+  // Validate input text
+  const trimmedText = textToSpeak?.trim();
+  if (!trimmedText || trimmedText.length < 2) {
+    logger.warn('TTS skipped: Text too short or empty', {
+      originalLength: textToSpeak?.length || 0,
+      trimmedLength: trimmedText?.length || 0,
+    });
+    return;
+  }
+
+  // Log the TTS request with voice options
+  logger.debug('Starting speech synthesis with custom options', {
+    characterCount: trimmedText.length,
+    voiceOptions: options,
+  });
+
+  const currentSynthesizer = await initializeSynthesizer();
+  if (!currentSynthesizer) {
+    logger.warn(
+      'Azure Speech Synthesizer not available. Falling back to Web Speech API.'
+    );
+    return playWebSpeechFallback(trimmedText, options);
+  }
+
+  // Unlock audio context jika diperlukan
+  unlockAudioContext();
+
+  try {
+    // Generate SSML with voice customization
+    const ssmlText = generateSSML(trimmedText, options);
+
+    logger.debug('Generated SSML for TTS', {
+      ssmlLength: ssmlText.length,
+      hasStyle: !!options.style,
+      voiceParams: {
+        rate: options.rate,
+        pitch: options.pitch,
+        volume: options.volume,
+      },
+    });
+    return new Promise<void>((resolve, reject) => {
+      const startTime = Date.now();
+
+      currentSynthesizer.speakSsmlAsync(
+        ssmlText,
+        (result) => {
+          const duration = Date.now() - startTime;
+          const reasonName = SpeechSDK.ResultReason[result.reason];
+          const audioDataLength = result.audioData?.byteLength || 0;
+
+          logger.info('🔊 Azure TTS Result', {
+            duration,
+            resultReason: result.reason,
+            reasonName,
+            audioDataLength,
+            errorDetails: result.errorDetails || 'none',
+            voiceName: VOICE_NAME,
+            language: VOICE_LANGUAGE,
+          });
+
+          // Check if synthesis was successful
+          if (
+            result.reason === SpeechSDK.ResultReason.SynthesizingAudioCompleted
+          ) {
+            if (audioDataLength > 0) {
+              logger.info('✅ TTS audio data generated successfully');
+            } else {
+              logger.warn('⚠️ TTS completed but no audio data generated');
+            }
+            resolve();
+          } else {
+            logger.error('❌ TTS synthesis failed', {
+              reason: reasonName,
+              errorDetails: result.errorDetails,
+            });
+            reject(new Error(`TTS synthesis failed: ${reasonName}`));
+          }
+        },
+        (error) => {
+          const duration = Date.now() - startTime;
+          logger.error('❌ Azure TTS error callback', {
+            duration,
+            error: error.toString(),
+            voiceName: VOICE_NAME,
+            language: VOICE_LANGUAGE,
+          });
+          reject(new Error(`Azure TTS failed: ${error}`));
+        }
+      );
+    });
+  } catch (error) {
+    logger.error('Error in Azure TTS synthesis with options');
+    throw error;
+  }
+}
+
+/**
+ * Fallback to Web Speech API with basic rate control
+ */
+function playWebSpeechFallback(
+  text: string,
+  options: VoiceOptions
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (!('speechSynthesis' in window)) {
+      reject(new Error('Web Speech API not supported'));
+      return;
+    }
+
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = VOICE_LANGUAGE;
+    // Apply basic options supported by Web Speech API
+    if (options.rate) {
+      utterance.rate = Math.max(0.1, Math.min(10, options.rate));
+    }
+    if (options.pitch && typeof options.pitch === 'string') {
+      // Convert percentage to numeric value for Web Speech API
+      const pitchMatch = options.pitch.match(/([+-]?\d+)%/);
+      if (pitchMatch && pitchMatch[1]) {
+        const pitchPercent = parseInt(pitchMatch[1], 10);
+        utterance.pitch = Math.max(0, Math.min(2, 1 + pitchPercent / 100));
+      }
+    }
+    if (options.volume) {
+      utterance.volume = Math.max(0, Math.min(1, options.volume / 100));
+    }
+
+    utterance.onend = () => resolve();
+    utterance.onerror = (event) =>
+      reject(new Error(`Web Speech API error: ${event.error}`));
+
+    window.speechSynthesis.speak(utterance);
   });
 }
 
@@ -489,7 +801,7 @@ export function stopAzureTTS(): void {
       synthesizer = null; // Will be re-initialized on next call
       logger.debug('Speech synthesis stopped');
     } catch (error: unknown) {
-      logger.warn('Error stopping speech synthesis');
+      logger.warn('Error stopping speech synthesis', error);
     }
   }
 
@@ -498,8 +810,8 @@ export function stopAzureTTS(): void {
     try {
       window.speechSynthesis.cancel();
       logger.debug('Web Speech API synthesis stopped');
-    } catch (error) {
-      logger.warn('Error stopping Web Speech API synthesis');
+    } catch (error: unknown) {
+      logger.warn('Error stopping Web Speech API synthesis', error);
     }
   }
 }
@@ -601,3 +913,301 @@ export function unlockAudioContext() {
     logger.debug('AudioContext already active');
   }
 }
+
+/**
+ * Convenient preset functions for common mental health conversation scenarios
+ * Uses predefined voice configurations optimized for each context
+ */
+
+/**
+ * Play text with calm, soothing voice parameters - ideal for anxiety relief
+ */
+export async function playCalm(text: string): Promise<void> {
+  return playAzureTTSWithOptions(text, VOICE_PRESETS.calm);
+}
+
+/**
+ * Play text with encouraging, uplifting voice parameters - ideal for motivation
+ */
+export async function playEncouraging(text: string): Promise<void> {
+  return playAzureTTSWithOptions(text, VOICE_PRESETS.encouraging);
+}
+
+/**
+ * Play text with empathetic voice parameters - ideal for difficult conversations
+ */
+export async function playEmpathetic(text: string): Promise<void> {
+  return playAzureTTSWithOptions(text, VOICE_PRESETS.empathetic);
+}
+
+/**
+ * Play text with professional voice parameters - ideal for informational content
+ */
+export async function playProfessional(text: string): Promise<void> {
+  return playAzureTTSWithOptions(text, VOICE_PRESETS.professional);
+}
+
+/**
+ * Create custom voice configuration with validation
+ */
+export function createVoiceOptions(
+  options: Partial<VoiceOptions>
+): VoiceOptions {
+  const validated: VoiceOptions = { ...DEFAULT_VOICE_OPTIONS };
+
+  // Validate and apply rate
+  if (options.rate !== undefined) {
+    validated.rate = Math.max(0.5, Math.min(2.0, options.rate));
+  }
+  // Validate and apply pitch
+  if (options.pitch !== undefined) {
+    const pitchMatch = options.pitch.match(/^([+-]?\d{1,2})%$/);
+    if (pitchMatch && pitchMatch[1]) {
+      const pitchValue = parseInt(pitchMatch[1], 10);
+      if (pitchValue >= -50 && pitchValue <= 50) {
+        validated.pitch = options.pitch;
+      }
+    }
+  }
+
+  // Validate and apply volume
+  if (options.volume !== undefined) {
+    validated.volume = Math.max(0, Math.min(100, options.volume));
+  }
+
+  // Apply style and styleDegree if valid
+  if (options.style) {
+    const validStyles = ['cheerful', 'sad', 'friendly', 'hopeful'];
+    if (validStyles.includes(options.style)) {
+      validated.style = options.style;
+    }
+  }
+
+  if (options.styleDegree !== undefined) {
+    validated.styleDegree = Math.max(0.01, Math.min(2.0, options.styleDegree));
+  }
+
+  return validated;
+}
+
+/**
+ * Smart Voice Adaptation System
+ * Automatically selects appropriate voice parameters based on chat completion content
+ */
+
+/**
+ * Analyze response content and determine appropriate voice preset
+ */
+export function analyzeResponseForVoice(
+  responseText: string
+): keyof typeof VOICE_PRESETS {
+  const text = responseText.toLowerCase();
+
+  // Keywords for different emotional contexts
+  const calmKeywords = [
+    'tenang',
+    'rileks',
+    'napas',
+    'pelan',
+    'santai',
+    'damai',
+    'tenangkan',
+  ];
+  const encouragingKeywords = [
+    'semangat',
+    'bisa',
+    'kuat',
+    'hebat',
+    'bagus',
+    'luar biasa',
+    'bangga',
+    'berhasil',
+  ];
+  const empatheticKeywords = [
+    'mengerti',
+    'pahami',
+    'sulit',
+    'berat',
+    'sedih',
+    'wajar',
+    'normal',
+    'feelings',
+  ];
+  const professionalKeywords = [
+    'strategi',
+    'teknik',
+    'cara',
+    'langkah',
+    'metode',
+    'saran',
+    'rekomendasi',
+  ];
+
+  // Count matches for each category
+  const calmScore = calmKeywords.filter((keyword) =>
+    text.includes(keyword)
+  ).length;
+  const encouragingScore = encouragingKeywords.filter((keyword) =>
+    text.includes(keyword)
+  ).length;
+  const empatheticScore = empatheticKeywords.filter((keyword) =>
+    text.includes(keyword)
+  ).length;
+  const professionalScore = professionalKeywords.filter((keyword) =>
+    text.includes(keyword)
+  ).length;
+
+  // Determine best match
+  const scores = {
+    calm: calmScore,
+    encouraging: encouragingScore,
+    empathetic: empatheticScore,
+    professional: professionalScore,
+  };
+
+  const maxScore = Math.max(...Object.values(scores));
+
+  // If no clear match, use professional as default
+  if (maxScore === 0) {
+    return 'professional';
+  }
+
+  // Return the preset with highest score
+  return Object.keys(scores).find(
+    (key) => scores[key as keyof typeof scores] === maxScore
+  ) as keyof typeof VOICE_PRESETS;
+}
+
+/**
+ * Smart TTS function that adapts voice based on content
+ * This is the main function to use for chat responses
+ */
+export async function playSmartTTS(responseText: string): Promise<void> {
+  try {
+    logger.info('🎤 Starting playSmartTTS', {
+      textLength: responseText.length,
+      firstWords: responseText.substring(0, 50),
+    });
+
+    // Ensure audio context is ready
+    const audioCtx = getAudioContext();
+    logger.debug('AudioContext state:', audioCtx.state);
+
+    // Analyze content to determine best voice preset
+    const voicePreset = analyzeResponseForVoice(responseText);
+
+    logger.info('🎵 Smart TTS selected preset', {
+      preset: voicePreset,
+      textLength: responseText.length,
+      audioContextState: audioCtx.state,
+    });
+
+    // Use the appropriate preset function
+    switch (voicePreset) {
+      case 'calm':
+        return await playCalm(responseText);
+      case 'encouraging':
+        return await playEncouraging(responseText);
+      case 'empathetic':
+        return await playEmpathetic(responseText);
+      case 'professional':
+      default:
+        return await playProfessional(responseText);
+    }
+  } catch (error: unknown) {
+    // Fallback to standard TTS if smart adaptation fails
+    logger.warn('Smart TTS failed, falling back to standard TTS', error);
+    return await playAzureTTS(responseText);
+  }
+}
+
+/**
+ * Advanced smart TTS with crisis detection and adaptive response
+ */
+export async function playAdaptiveMentalHealthTTS(
+  responseText: string,
+  mentalHealthContext?: {
+    userEmotion?: 'anxious' | 'sad' | 'angry' | 'hopeful' | 'neutral';
+    crisisLevel?: 'low' | 'medium' | 'high';
+    sessionType?: 'first' | 'ongoing' | 'crisis';
+  }
+): Promise<void> {
+  try {
+    let voiceOptions: VoiceOptions;
+
+    // Crisis-specific voice adaptation
+    if (mentalHealthContext?.crisisLevel === 'high') {
+      voiceOptions = {
+        ...VOICE_PRESETS.calm,
+        rate: 0.7, // Very slow for crisis situations
+        pitch: '-8%', // Lower pitch for calming effect
+        volume: 45, // Softer volume
+        style: 'friendly',
+        styleDegree: 0.7,
+      };
+    } else if (mentalHealthContext?.userEmotion === 'anxious') {
+      voiceOptions = VOICE_PRESETS.calm;
+    } else if (mentalHealthContext?.userEmotion === 'sad') {
+      voiceOptions = VOICE_PRESETS.empathetic;
+    } else {
+      // Use content-based analysis as fallback
+      const preset = analyzeResponseForVoice(responseText);
+      switch (preset) {
+        case 'calm':
+          voiceOptions = VOICE_PRESETS.calm;
+          break;
+        case 'encouraging':
+          voiceOptions = VOICE_PRESETS.encouraging;
+          break;
+        case 'empathetic':
+          voiceOptions = VOICE_PRESETS.empathetic;
+          break;
+        case 'professional':
+        default:
+          voiceOptions = VOICE_PRESETS.professional;
+          break;
+      }
+    }
+
+    logger.debug('Adaptive mental health TTS', {
+      userEmotion: mentalHealthContext?.userEmotion,
+      crisisLevel: mentalHealthContext?.crisisLevel,
+      voiceOptions,
+    });
+
+    return await playAzureTTSWithOptions(responseText, voiceOptions);
+  } catch (error: unknown) {
+    logger.warn('Adaptive mental health TTS failed, using fallback', error);
+    return await playSmartTTS(responseText);
+  }
+}
+
+/**
+ * Test function to verify TTS functionality with comprehensive logging
+ */
+export async function testTTS(): Promise<void> {
+  try {
+    logger.info('🧪 Starting TTS test...');
+
+    // Check audio context
+    const audioCtx = getAudioContext();
+    logger.info('AudioContext state:', audioCtx.state);
+
+    // Test simple text
+    const testText = 'Halo, ini adalah tes suara untuk VirPal';
+    logger.info('Testing with text:', testText);
+
+    // Test Azure TTS with default options
+    await playAzureTTSWithOptions(testText, DEFAULT_VOICE_OPTIONS);
+
+    logger.info('✅ TTS test completed successfully');
+  } catch (error) {
+    logger.error('❌ TTS test failed:', error);
+    throw error;
+  }
+}
+
+/**
+ * Smart TTS functions are already exported above in their individual declarations
+ * All functions are available for import
+ */

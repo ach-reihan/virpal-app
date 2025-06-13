@@ -368,6 +368,15 @@ function AppContent() {
       guestLimitService.incrementMessageCount();
     }
 
+    // Enhanced logging for TTS debugging
+    logger.info('📤 Sending message with TTS status', {
+      isAuthenticated,
+      ttsIsEnabled: tts.isEnabled,
+      ttsIsInitialized: tts.isInitialized,
+      ttsError: tts.initializationError,
+      finalEnableTTS: tts.isEnabled && isAuthenticated,
+    });
+
     await handleUserSendMessage(messageText, messages, {
       setMessages,
       setIsVirpalTyping,

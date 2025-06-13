@@ -1,0 +1,54 @@
+version: 2
+updates:
+  # Enable version updates for npm
+  - package-ecosystem: 'npm'
+    directory: '/'
+    schedule:
+      interval: 'weekly'
+      day: 'monday'
+      time: '09:00'
+    reviewers:
+      - 'ach-reihan' # Replace with your GitHub username
+    assignees:
+      - 'ach-reihan' # Replace with your GitHub username
+    commit-message:
+      prefix: 'chore(deps)'
+      include: 'scope'
+    open-pull-requests-limit: 5
+    target-branch: 'develop'
+
+    # Group updates for better management
+    groups:
+      azure-dependencies:
+        patterns:
+          - '@azure/*'
+        update-types:
+          - 'minor'
+          - 'patch'
+
+      development-dependencies:
+        dependency-type: 'development'
+        update-types:
+          - 'minor'
+          - 'patch'
+
+      production-dependencies:
+        dependency-type: 'production'
+        update-types:
+          - 'patch'
+
+  # Enable version updates for GitHub Actions
+  - package-ecosystem: 'github-actions'
+    directory: '/'
+    schedule:
+      interval: 'weekly'
+      day: 'monday'
+      time: '09:00'
+    reviewers:
+      - 'ach-reihan' # Replace with your GitHub username
+    assignees:
+      - 'ach-reihan' # Replace with your GitHub username
+    commit-message:
+      prefix: 'chore(actions)'
+      include: 'scope'
+    open-pull-requests-limit: 3

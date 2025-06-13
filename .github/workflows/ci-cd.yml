@@ -2,13 +2,13 @@ name: VirPal App Enterprise CI/CD Pipeline
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [main, develop]
     paths-ignore:
       - '*.md'
       - 'docs/**'
       - '.vscode/**'
   pull_request:
-    branches: [ main ]
+    branches: [main]
   workflow_dispatch:
     inputs:
       environment:
@@ -17,8 +17,8 @@ on:
         default: 'staging'
         type: choice
         options:
-        - staging
-        - production
+          - staging
+          - production
       skip_tests:
         description: 'Skip tests'
         required: false
@@ -36,27 +36,26 @@ jobs:
   security-scan:
     name: Security Scan
     runs-on: ubuntu-latest
-    
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
-    
-    - name: Run Trivy vulnerability scanner
-      uses: aquasecurity/trivy-action@master
-      with:
-        scan-type: 'fs'
-        scan-ref: '.'
-        format: 'sarif'
-        output: 'trivy-results.sarif'
-    
-    - name: Upload Trivy scan results to GitHub Security tab
-      uses: github/codeql-action/upload-sarif@v3
-      if: always()
-      with:
-        sarif_file: 'trivy-results.sarif'
 
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+
+      - name: Upload Trivy scan results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
   # Comprehensive build, test, and validation
   build-and-validate:
     name: Build and Validate
@@ -67,376 +66,382 @@ jobs:
     outputs:
       deployment-ready: ${{ steps.validate.outputs.ready }}
       build-summary: ${{ steps.validate.outputs.summary }}
-    
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
-    
-    - name: Setup Node.js ${{ matrix.node-version }}
-      uses: actions/setup-node@v4
-      with:
-        node-version: ${{ matrix.node-version }}
-        cache: 'npm'
-        cache-dependency-path: 'package-lock.json'
-    
-    - name: Cache dependencies and build artifacts
-      uses: actions/cache@v4
-      with:
-        path: |
-          ~/.npm
-          node_modules
-          dist
-          dist-frontend
-        key: ${{ runner.os }}-virpal-${{ matrix.node-version }}-${{ hashFiles('**/package-lock.json', 'src/**/*', 'tsconfig*.json') }}
-        restore-keys: |
-          ${{ runner.os }}-virpal-${{ matrix.node-version }}-
-    
-    - name: Run comprehensive deployment validation
-      id: validate
-      shell: pwsh
-      run: |
-        $environment = if ('${{ github.ref }}' -eq 'refs/heads/main') { 'production' } else { 'staging' }
-        $skipTests = if ('${{ github.event.inputs.skip_tests }}' -eq 'true') { '-SkipTests' } else { '' }
-        
-        Write-Host "Running deployment validation for environment: $environment"
-        
-        # Make script executable and run validation
-        chmod +x scripts/deploy-virpal.ps1
-        $result = & ./scripts/deploy-virpal.ps1 -Environment $environment -DeploymentType "validate-only" $skipTests
-        
-        if ($LASTEXITCODE -eq 0) {
-          echo "ready=true" >> $env:GITHUB_OUTPUT
-          echo "summary=Validation passed for $environment" >> $env:GITHUB_OUTPUT
-        } else {
-          echo "ready=false" >> $env:GITHUB_OUTPUT
-          echo "summary=Validation failed" >> $env:GITHUB_OUTPUT
-          exit 1
-        }
-    
-    - name: Build application
-      if: steps.validate.outputs.ready == 'true'
-      shell: pwsh
-      run: |
-        $environment = if ('${{ github.ref }}' -eq 'refs/heads/main') { 'production' } else { 'staging' }
-        $skipTests = if ('${{ github.event.inputs.skip_tests }}' -eq 'true') { '-SkipTests' } else { '' }
-        $prodDomain = if ($environment -eq 'production') { '-ProductionDomain "https://virpal.azurewebsites.net"' } else { '' }
-        
-        Write-Host "Building for environment: $environment"
-        & ./scripts/deploy-virpal.ps1 -Environment $environment -DeploymentType "build-only" $skipTests $prodDomain
-    
-    - name: Upload build artifacts
-      if: success()
-      uses: actions/upload-artifact@v4
-      with:
-        name: virpal-build-${{ github.sha }}
-        path: |
-          dist/
-          dist-frontend/
-          host.json
-          package.json
-          deployment-summary-*.json
-        retention-days: 30
-    
-    - name: Upload deployment logs
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: deployment-logs-${{ github.sha }}
-        path: |
-          deployment-*.log
-          deployment-summary-*.json
-        retention-days: 7
 
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+
+      - name: Cache dependencies and build artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.npm
+            node_modules
+            dist
+            dist-frontend
+          key: ${{ runner.os }}-virpal-${{ matrix.node-version }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-virpal-${{ matrix.node-version }}-
+            ${{ runner.os }}-virpal-
+
+      - name: Run comprehensive deployment validation
+        id: validate
+        shell: pwsh
+        run: |
+          $environment = if ('${{ github.ref }}' -eq 'refs/heads/main') { 'production' } else { 'staging' }
+          $skipTests = if ('${{ github.event.inputs.skip_tests }}' -eq 'true') { '-SkipTests' } else { '' }
+
+          Write-Host "Running deployment validation for environment: $environment"
+
+          # Make script executable and run validation
+          chmod +x scripts/deploy-virpal.ps1
+          $result = & ./scripts/deploy-virpal.ps1 -Environment $environment -DeploymentType "validate-only" $skipTests
+
+          if ($LASTEXITCODE -eq 0) {
+            echo "ready=true" >> $env:GITHUB_OUTPUT
+            echo "summary=Validation passed for $environment" >> $env:GITHUB_OUTPUT
+          } else {
+            echo "ready=false" >> $env:GITHUB_OUTPUT
+            echo "summary=Validation failed" >> $env:GITHUB_OUTPUT
+            exit 1
+          }
+
+      - name: Build application
+        if: steps.validate.outputs.ready == 'true'
+        shell: pwsh
+        run: |
+          $environment = if ('${{ github.ref }}' -eq 'refs/heads/main') { 'production' } else { 'staging' }
+          $skipTests = if ('${{ github.event.inputs.skip_tests }}' -eq 'true') { '-SkipTests' } else { '' }
+          $prodDomain = if ($environment -eq 'production') { '-ProductionDomain "https://virpal.azurewebsites.net"' } else { '' }
+
+          Write-Host "Building for environment: $environment"
+          & ./scripts/deploy-virpal.ps1 -Environment $environment -DeploymentType "build-only" $skipTests $prodDomain
+
+      - name: Upload build artifacts
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: virpal-build-${{ github.sha }}
+          path: |
+            dist/
+            dist-frontend/
+            host.json
+            package.json
+            deployment-summary-*.json
+          retention-days: 30
+
+      - name: Upload deployment logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deployment-logs-${{ github.sha }}
+          path: |
+            deployment-*.log
+            deployment-summary-*.json
+          retention-days: 7
   # Staging deployment (develop branch or manual trigger)
   deploy-staging:
     name: Deploy to Staging
     needs: [security-scan, build-and-validate]
     runs-on: ubuntu-latest
     if: |
-      (github.ref == 'refs/heads/develop' && github.event_name == 'push') ||
-      (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'staging')
+      always() &&
+      needs.build-and-validate.result == 'success' &&
+      (needs.security-scan.result == 'success' || needs.security-scan.result == 'skipped') &&
+      (
+        (github.ref == 'refs/heads/develop' && github.event_name == 'push') ||
+        (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'staging')      )
     environment:
       name: staging
       url: ${{ steps.deploy.outputs.app-url }}
-    
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-    
-    - name: Download build artifacts
-      uses: actions/download-artifact@v4
-      with:
-        name: virpal-build-${{ github.sha }}
-    
-    - name: Setup Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: ${{ env.NODE_VERSION }}
-    
-    - name: Prepare deployment package
-      shell: pwsh
-      run: |
-        Write-Host "Creating staging deployment package..."
-        chmod +x scripts/deploy-virpal.ps1
-        & ./scripts/deploy-virpal.ps1 -Environment staging -DeploymentType "full-deploy" -SkipTests
-    
-    - name: Login to Azure
-      uses: azure/login@v2
-      with:
-        creds: ${{ secrets.AZURE_CREDENTIALS_STAGING }}
-    
-    - name: Deploy to Azure Functions (Staging)
-      id: deploy
-      uses: Azure/functions-action@v1
-      with:
-        app-name: ${{ env.AZURE_FUNCTIONAPP_NAME_STAGING }}
-        package: './deployment/backend'
-        respect-funcignore: true
-        scm-do-build-during-deployment: false
-        enable-oryx-build: false
-    
-    - name: Deploy frontend to staging
-      run: |
-        # This would typically deploy to Azure Static Web Apps or CDN
-        # For now, we'll just verify the package exists
-        if [ -d "./deployment/frontend" ]; then
-          echo "✅ Frontend package ready for deployment"
-          ls -la ./deployment/frontend/
-        else
-          echo "❌ Frontend package not found"
-          exit 1
-        fi
-    
-    - name: Health check with retry
-      run: |
-        echo "Waiting for deployment to complete..."
-        sleep 60
-        
-        max_attempts=5
-        attempt=1
-        while [ $attempt -le $max_attempts ]; do
-          echo "Health check attempt $attempt of $max_attempts..."
-          if curl -f -s "${{ steps.deploy.outputs.app-url }}/api/health"; then
-            echo "✅ Health check passed"
-            break
-          else
-            echo "⚠️ Health check failed, retrying in 30 seconds..."
-            sleep 30
-            attempt=$((attempt + 1))
-          fi
-        done
-        
-        if [ $attempt -gt $max_attempts ]; then
-          echo "❌ Health check failed after $max_attempts attempts"
-          exit 1
-        fi
-    
-    - name: Run deployment verification
-      run: |
-        echo "Running post-deployment verification..."
-        
-        # Test main endpoints
-        curl -f "${{ steps.deploy.outputs.app-url }}/api/health" -H "Accept: application/json"
-        
-        # You can add more endpoint tests here
-        echo "✅ Deployment verification completed"
-    
-    - name: Notify deployment success
-      if: success()
-      run: |
-        echo "🎉 Staging deployment successful!"
-        echo "URL: ${{ steps.deploy.outputs.app-url }}"
 
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: virpal-build-${{ github.sha }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Prepare deployment package
+        shell: pwsh
+        run: |
+          Write-Host "Creating staging deployment package..."
+          chmod +x scripts/deploy-virpal.ps1
+          & ./scripts/deploy-virpal.ps1 -Environment staging -DeploymentType "full-deploy" -SkipTests
+
+      - name: Login to Azure
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS_STAGING }}
+
+      - name: Deploy to Azure Functions (Staging)
+        id: deploy
+        uses: Azure/functions-action@v1
+        with:
+          app-name: ${{ env.AZURE_FUNCTIONAPP_NAME_STAGING }}
+          package: './deployment/backend'
+          respect-funcignore: true
+          scm-do-build-during-deployment: false
+          enable-oryx-build: false
+
+      - name: Deploy frontend to staging
+        run: |
+          # This would typically deploy to Azure Static Web Apps or CDN
+          # For now, we'll just verify the package exists
+          if [ -d "./deployment/frontend" ]; then
+            echo "✅ Frontend package ready for deployment"
+            ls -la ./deployment/frontend/
+          else
+            echo "❌ Frontend package not found"
+            exit 1
+          fi
+
+      - name: Health check with retry
+        run: |
+          echo "Waiting for deployment to complete..."
+          sleep 60
+
+          max_attempts=5
+          attempt=1
+          while [ $attempt -le $max_attempts ]; do
+            echo "Health check attempt $attempt of $max_attempts..."
+            if curl -f -s "${{ steps.deploy.outputs.app-url }}/api/health"; then
+              echo "✅ Health check passed"
+              break
+            else
+              echo "⚠️ Health check failed, retrying in 30 seconds..."
+              sleep 30
+              attempt=$((attempt + 1))
+            fi
+          done
+
+          if [ $attempt -gt $max_attempts ]; then
+            echo "❌ Health check failed after $max_attempts attempts"
+            exit 1
+          fi
+
+      - name: Run deployment verification
+        run: |
+          echo "Running post-deployment verification..."
+
+          # Test main endpoints
+          curl -f "${{ steps.deploy.outputs.app-url }}/api/health" -H "Accept: application/json"
+
+          # You can add more endpoint tests here
+          echo "✅ Deployment verification completed"
+
+      - name: Notify deployment success
+        if: success()
+        run: |
+          echo "🎉 Staging deployment successful!"
+          echo "URL: ${{ steps.deploy.outputs.app-url }}"
   # Production deployment (main branch or manual trigger)
   deploy-production:
     name: Deploy to Production
     needs: [security-scan, build-and-validate]
     runs-on: ubuntu-latest
     if: |
-      (github.ref == 'refs/heads/main' && github.event_name == 'push') ||
-      (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'production')
+      always() &&
+      needs.build-and-validate.result == 'success' &&
+      (needs.security-scan.result == 'success' || needs.security-scan.result == 'skipped') &&
+      (
+        (github.ref == 'refs/heads/main' && github.event_name == 'push') ||
+        (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'production')      )
     environment:
       name: production
       url: ${{ steps.deploy.outputs.app-url }}
-    
+
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-    
-    - name: Download build artifacts
-      uses: actions/download-artifact@v4
-      with:
-        name: virpal-build-${{ github.sha }}
-    
-    - name: Setup Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: ${{ env.NODE_VERSION }}
-    
-    - name: Prepare production deployment package
-      shell: pwsh
-      run: |
-        Write-Host "Creating production deployment package..."
-        chmod +x scripts/deploy-virpal.ps1
-        & ./scripts/deploy-virpal.ps1 -Environment production -DeploymentType "full-deploy" -ProductionDomain "https://virpal.azurewebsites.net" -SkipTests
-    
-    - name: Login to Azure
-      uses: azure/login@v2
-      with:
-        creds: ${{ secrets.AZURE_CREDENTIALS_PRODUCTION }}
-    
-    - name: Deploy to Azure Functions (Production)
-      id: deploy
-      uses: Azure/functions-action@v1
-      with:
-        app-name: ${{ env.AZURE_FUNCTIONAPP_NAME_PRODUCTION }}
-        package: './deployment/backend'
-        respect-funcignore: true
-        scm-do-build-during-deployment: false
-        enable-oryx-build: false
-    
-    - name: Deploy frontend to production
-      run: |
-        # This would typically deploy to Azure Static Web Apps or CDN
-        # For production, add your actual deployment commands here
-        if [ -d "./deployment/frontend" ]; then
-          echo "✅ Frontend package ready for production deployment"
-          ls -la ./deployment/frontend/
-          # az storage blob upload-batch --source ./deployment/frontend --destination '$web' --account-name <storage-account>
-        else
-          echo "❌ Frontend package not found"
-          exit 1
-        fi
-    
-    - name: Production health check with extensive retry
-      run: |
-        echo "Waiting for production deployment to stabilize..."
-        sleep 90
-        
-        max_attempts=10
-        attempt=1
-        while [ $attempt -le $max_attempts ]; do
-          echo "Production health check attempt $attempt of $max_attempts..."
-          if curl -f -s "${{ steps.deploy.outputs.app-url }}/api/health" -H "Accept: application/json"; then
-            echo "✅ Production health check passed"
-            break
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: virpal-build-${{ github.sha }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Prepare production deployment package
+        shell: pwsh
+        run: |
+          Write-Host "Creating production deployment package..."
+          chmod +x scripts/deploy-virpal.ps1
+          & ./scripts/deploy-virpal.ps1 -Environment production -DeploymentType "full-deploy" -ProductionDomain "https://virpal.azurewebsites.net" -SkipTests
+
+      - name: Login to Azure
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS_PRODUCTION }}
+
+      - name: Deploy to Azure Functions (Production)
+        id: deploy
+        uses: Azure/functions-action@v1
+        with:
+          app-name: ${{ env.AZURE_FUNCTIONAPP_NAME_PRODUCTION }}
+          package: './deployment/backend'
+          respect-funcignore: true
+          scm-do-build-during-deployment: false
+          enable-oryx-build: false
+
+      - name: Deploy frontend to production
+        run: |
+          # This would typically deploy to Azure Static Web Apps or CDN
+          # For production, add your actual deployment commands here
+          if [ -d "./deployment/frontend" ]; then
+            echo "✅ Frontend package ready for production deployment"
+            ls -la ./deployment/frontend/
+            # az storage blob upload-batch --source ./deployment/frontend --destination '$web' --account-name <storage-account>
           else
-            echo "⚠️ Production health check failed, retrying in 45 seconds..."
-            sleep 45
-            attempt=$((attempt + 1))
+            echo "❌ Frontend package not found"
+            exit 1
           fi
-        done
-        
-        if [ $attempt -gt $max_attempts ]; then
-          echo "❌ Production health check failed after $max_attempts attempts"
-          # Trigger rollback procedure
-          echo "🔄 Initiating rollback procedure..."
-          exit 1
-        fi
-    
-    - name: Production smoke tests
-      run: |
-        echo "Running production smoke tests..."
-        base_url="${{ steps.deploy.outputs.app-url }}"
-        
-        # Test health endpoint
-        curl -f "$base_url/api/health" -H "Accept: application/json"
-        
-        # Test CORS headers
-        curl -f -H "Origin: https://virpal.azurewebsites.net" \
-             -H "Access-Control-Request-Method: POST" \
-             -H "Access-Control-Request-Headers: Content-Type" \
-             -X OPTIONS "$base_url/api/chat-completion"
-        
-        echo "✅ Production smoke tests completed"
-    
-    - name: Create production deployment record
-      run: |
-        echo "Creating deployment record..."
-        cat > deployment-record.json << EOF
-        {
-          "timestamp": "$(date -Iseconds)",
-          "environment": "production",
-          "commit": "${{ github.sha }}",
-          "branch": "${{ github.ref_name }}",
-          "actor": "${{ github.actor }}",
-          "workflow_run": "${{ github.run_id }}",
-          "app_url": "${{ steps.deploy.outputs.app-url }}",
-          "version": "v${{ github.run_number }}",
-          "deployment_type": "automated"
-        }
-        EOF
-        
-        echo "✅ Deployment record created"
-    
-    - name: Notify production deployment success
-      if: success()
-      run: |
-        echo "🎉 Production deployment successful!"
-        echo "URL: ${{ steps.deploy.outputs.app-url }}"
-        echo "Version: v${{ github.run_number }}"
-        echo "Commit: ${{ github.sha }}"
-        
-        # Optional: Send notification webhook (only if secret exists)
-        if [ -n "${{ secrets.MONITORING_WEBHOOK || '' }}" ]; then
-          curl -X POST "${{ secrets.MONITORING_WEBHOOK }}" \
-            -H "Content-Type: application/json" \
-            -d '{
-              "text": "🚀 VirPal App deployed to production successfully",
-              "environment": "production",
-              "version": "v${{ github.run_number }}",
-              "url": "${{ steps.deploy.outputs.app-url }}"
-            }' || echo "Webhook notification failed"
-        fi
-    
-    - name: Create deployment tag
-      if: success()
-      run: |
-        git config --local user.email "action@github.com"
-        git config --local user.name "GitHub Action"
-        git tag -a "v${{ github.run_number }}" -m "Production deployment ${{ github.run_number }}"
-        git push origin "v${{ github.run_number }}"
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-    
-    - name: Post-deployment monitoring
-      if: success()
-      run: |
-        echo "Setting up post-deployment monitoring..."
-        # Send success notification (only if secret exists)
-        if [ -n "${{ secrets.MONITORING_WEBHOOK || '' }}" ]; then
-          curl -X POST "${{ secrets.MONITORING_WEBHOOK }}" \
-            -H "Content-Type: application/json" \
-            -d '{
-              "event": "deployment_success",
-              "environment": "production",
-              "version": "v${{ github.run_number }}",
-              "timestamp": "'$(date -Iseconds)'",
-              "function_app": "${{ env.AZURE_FUNCTIONAPP_NAME_PRODUCTION }}"
-            }' || echo "Failed to send monitoring notification"
-        fi
-    
-    - name: Rollback on failure
-      if: failure()
-      run: |
-        echo "🚨 Deployment or health checks failed - logging incident..."
-        
-        # Send failure alert (only if secret exists)
-        if [ -n "${{ secrets.ALERT_WEBHOOK || '' }}" ]; then
-          curl -X POST "${{ secrets.ALERT_WEBHOOK }}" \
-            -H "Content-Type: application/json" \
-            -d '{
-              "alert": "Production deployment failed",
-              "environment": "production",
-              "run_id": "${{ github.run_id }}",
-              "commit": "${{ github.sha }}",
-              "timestamp": "'$(date -Iseconds)'"
-            }' || echo "Failed to send failure alert"
-        fi
-        
-        echo "Manual rollback may be required. Check the rollback script in scripts/"
+
+      - name: Production health check with extensive retry
+        run: |
+          echo "Waiting for production deployment to stabilize..."
+          sleep 90
+
+          max_attempts=10
+          attempt=1
+          while [ $attempt -le $max_attempts ]; do
+            echo "Production health check attempt $attempt of $max_attempts..."
+            if curl -f -s "${{ steps.deploy.outputs.app-url }}/api/health" -H "Accept: application/json"; then
+              echo "✅ Production health check passed"
+              break
+            else
+              echo "⚠️ Production health check failed, retrying in 45 seconds..."
+              sleep 45
+              attempt=$((attempt + 1))
+            fi
+          done
+
+          if [ $attempt -gt $max_attempts ]; then
+            echo "❌ Production health check failed after $max_attempts attempts"
+            # Trigger rollback procedure
+            echo "🔄 Initiating rollback procedure..."
+            exit 1
+          fi
+
+      - name: Production smoke tests
+        run: |
+          echo "Running production smoke tests..."
+          base_url="${{ steps.deploy.outputs.app-url }}"
+
+          # Test health endpoint
+          curl -f "$base_url/api/health" -H "Accept: application/json"
+
+          # Test CORS headers
+          curl -f -H "Origin: https://virpal.azurewebsites.net" \
+               -H "Access-Control-Request-Method: POST" \
+               -H "Access-Control-Request-Headers: Content-Type" \
+               -X OPTIONS "$base_url/api/chat-completion"
+
+          echo "✅ Production smoke tests completed"
+
+      - name: Create production deployment record
+        run: |
+          echo "Creating deployment record..."
+          cat > deployment-record.json << EOF
+          {
+            "timestamp": "$(date -Iseconds)",
+            "environment": "production",
+            "commit": "${{ github.sha }}",
+            "branch": "${{ github.ref_name }}",
+            "actor": "${{ github.actor }}",
+            "workflow_run": "${{ github.run_id }}",
+            "app_url": "${{ steps.deploy.outputs.app-url }}",
+            "version": "v${{ github.run_number }}",
+            "deployment_type": "automated"
+          }
+          EOF
+
+          echo "✅ Deployment record created"
+
+      - name: Notify production deployment success
+        if: success()
+        run: |
+          echo "🎉 Production deployment successful!"
+          echo "URL: ${{ steps.deploy.outputs.app-url }}"
+          echo "Version: v${{ github.run_number }}"
+          echo "Commit: ${{ github.sha }}"
+
+          # Optional: Send notification webhook (only if secret exists)
+          if [ -n "${{ secrets.MONITORING_WEBHOOK || '' }}" ]; then
+            curl -X POST "${{ secrets.MONITORING_WEBHOOK }}" \
+              -H "Content-Type: application/json" \
+              -d '{
+                "text": "🚀 VirPal App deployed to production successfully",
+                "environment": "production",
+                "version": "v${{ github.run_number }}",
+                "url": "${{ steps.deploy.outputs.app-url }}"
+              }' || echo "Webhook notification failed"
+          fi
+
+      - name: Create deployment tag
+        if: success()
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git tag -a "v${{ github.run_number }}" -m "Production deployment ${{ github.run_number }}"
+          git push origin "v${{ github.run_number }}"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Post-deployment monitoring
+        if: success()
+        run: |
+          echo "Setting up post-deployment monitoring..."
+          # Send success notification (only if secret exists)
+          if [ -n "${{ secrets.MONITORING_WEBHOOK || '' }}" ]; then
+            curl -X POST "${{ secrets.MONITORING_WEBHOOK }}" \
+              -H "Content-Type: application/json" \
+              -d '{
+                "event": "deployment_success",
+                "environment": "production",
+                "version": "v${{ github.run_number }}",
+                "timestamp": "'$(date -Iseconds)'",
+                "function_app": "${{ env.AZURE_FUNCTIONAPP_NAME_PRODUCTION }}"
+              }' || echo "Failed to send monitoring notification"
+          fi
+
+      - name: Rollback on failure
+        if: failure()
+        run: |
+          echo "🚨 Deployment or health checks failed - logging incident..."
+
+          # Send failure alert (only if secret exists)
+          if [ -n "${{ secrets.ALERT_WEBHOOK || '' }}" ]; then
+            curl -X POST "${{ secrets.ALERT_WEBHOOK }}" \
+              -H "Content-Type: application/json" \
+              -d '{
+                "alert": "Production deployment failed",
+                "environment": "production",
+                "run_id": "${{ github.run_id }}",
+                "commit": "${{ github.sha }}",
+                "timestamp": "'$(date -Iseconds)'"
+              }' || echo "Failed to send failure alert"
+          fi
+
+          echo "Manual rollback may be required. Check the rollback script in scripts/"
 
   # Cleanup job
   cleanup:
@@ -444,13 +449,13 @@ jobs:
     needs: [deploy-staging, deploy-production]
     runs-on: ubuntu-latest
     if: always()
-    
+
     steps:
-    - name: Delete old artifacts
-      uses: geekyeggo/delete-artifact@v5
-      with:
-        name: |
-          virpal-build-*
-          deployment-logs-*
-        useGlob: true
-        failOnError: false
+      - name: Delete old artifacts
+        uses: geekyeggo/delete-artifact@v5
+        with:
+          name: |
+            virpal-build-*
+            deployment-logs-*
+          useGlob: true
+          failOnError: false

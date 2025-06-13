@@ -17,16 +17,17 @@
  * For licensing inquiries: reihan3000@gmail.com
  */
 
-import type { ChatMessage, AvatarExpression } from '../types';
 import { getAzureOpenAICompletion } from '../services/azureFunctionService';
-import { playAzureTTS } from '../services/azureSpeechService';
+import { playSmartTTS } from '../services/azureSpeechService';
+import type { AvatarExpression, ChatMessage } from '../types';
 import { SYSTEM_PROMPT } from './constants';
 import {
+  createErrorMessage,
   createUserMessage,
   createVirpalMessage,
-  createErrorMessage,
   determineExpressionFromResponse,
 } from './helpers';
+import { logger } from './logger';
 
 // Interface untuk callback functions
 interface MessageHandlerCallbacks {
@@ -67,21 +68,33 @@ export const handleUserSendMessage = async (
     const virpalResponseMessage = createVirpalMessage(aiResponseText);
 
     setMessages((prev) => [...prev, virpalResponseMessage]);
-
     setVirpalExpression(determineExpressionFromResponse(aiResponseText));
 
-    // Play TTS if enabled
+    // Enhanced logging for TTS debugging
+    logger.info('🎤 TTS Status Check', {
+      enableTTS,
+      responseLength: aiResponseText.length,
+      firstWords: aiResponseText.substring(0, 50),
+    });
+
+    // Play TTS if enabled with smart voice adaptation
     if (enableTTS) {
       try {
-        await playAzureTTS(aiResponseText);
+        logger.info('🎵 Starting Smart TTS playback...');
+        await playSmartTTS(aiResponseText);
+        logger.info('✅ Smart TTS completed successfully');
       } catch (ttsError) {
         // TTS failure shouldn't break the chat experience
+        logger.error('❌ Smart TTS failed', ttsError);
       }
+    } else {
+      logger.info('🔇 TTS disabled - not playing audio');
     }
   } catch (error) {
     const errorMessage = createErrorMessage();
     setMessages((prev) => [...prev, errorMessage]);
     setVirpalExpression('sad');
+    logger.error('Error in handleUserSendMessage', error);
   } finally {
     setIsVirpalTyping(false);
   }

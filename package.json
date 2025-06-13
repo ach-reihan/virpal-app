@@ -42,6 +42,7 @@
     "build": "npm run build:frontend && npm run build:functions",
     "build:frontend": "vite build",
     "build:functions": "npm run clean:dist && tsc -p tsconfig.functions.json && node scripts/setup-functions.cjs",
+    "build:swa": "npm run build:frontend",
     "clean:dist": "node -e \"const fs=require('fs'),path=require('path'); if(fs.existsSync('dist')) fs.rmSync('dist',{recursive:true}); fs.mkdirSync('dist');\"",
     "lint": "eslint .",
     "preview": "vite preview",
@@ -53,13 +54,7 @@
     "functions:build": "npm run clean:dist && tsc -p tsconfig.functions.json && node scripts/setup-functions.cjs",
     "functions:watch": "tsc -p tsconfig.functions.json --watch",
     "functions:start": "node scripts/setup-functions.cjs && func host start --verbose",
-    "watch": "tsc -p tsconfig.functions.json --watch",
-    "dev:local": "node dev-mode.js local && npm run dev",
-    "dev:emulator": "node dev-mode.js emulator && npm run dev",
-    "dev:status": "node dev-mode.js status",
-    "mode:local": "node dev-mode.js local",
-    "mode:emulator": "node dev-mode.js emulator",
-    "mode:status": "node dev-mode.js status"
+    "watch": "tsc -p tsconfig.functions.json --watch"
   },
   "dependencies": {
     "@azure/cosmos": "^4.4.1",
