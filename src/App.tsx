@@ -296,36 +296,42 @@ function AppContent() {
   useEffect(() => {
     const saveMessages = async () => {
       if (messages.length > 1 && isStorageInitialized) {
-        // Lebih dari welcome message
-        // Start new session if none exists or if current session ended
-        if (!currentSession) {
-          const newSession = hybridChatStorageService.startNewSession();
-          setCurrentSession(newSession);
-        }
+        try {
+          // Lebih dari welcome message
+          // Start new session if none exists or if current session ended
+          if (!currentSession) {
+            const newSession = hybridChatStorageService.startNewSession();
+            setCurrentSession(newSession);
+          }
 
-        // Add messages to current session (only new messages)
-        if (currentSession && messages.length > 0) {
-          const lastMessage = messages[messages.length - 1];
-          if (lastMessage) {
-            const sessionHasMessage = currentSession.messages.some(
-              (m) => m.id === lastMessage.id
-            );
-
-            if (!sessionHasMessage) {
-              await hybridChatStorageService.addMessageToCurrentSession(
-                lastMessage
+          // Add messages to current session (only new messages)
+          if (currentSession && messages.length > 0) {
+            const lastMessage = messages[messages.length - 1];
+            if (lastMessage) {
+              const sessionHasMessage = currentSession.messages.some(
+                (m) => m.id === lastMessage.id
               );
-              // Update local session state
-              const updatedSession =
-                hybridChatStorageService.getCurrentSession();
-              if (updatedSession) {
-                setCurrentSession(updatedSession);
+
+              if (!sessionHasMessage) {
+                await hybridChatStorageService.addMessageToCurrentSession(
+                  lastMessage
+                );
+                // Update local session state
+                const updatedSession =
+                  hybridChatStorageService.getCurrentSession();
+                if (updatedSession) {
+                  setCurrentSession(updatedSession);
+                }
               }
             }
           }
-        }
 
-        loadDatesWithHistory();
+          loadDatesWithHistory();
+        } catch (error) {
+          console.warn('Error saving messages to storage:', error);
+          // Don't throw the error to prevent app crash
+          // The app can continue functioning without persistent storage
+        }
       }
     };
 
@@ -414,34 +420,44 @@ function AppContent() {
   };
 
   const handleDeleteHistory = async (date: string) => {
-    await hybridChatStorageService.deleteDayHistory(date);
-    loadDatesWithHistory();
-    setCurrentChatHistory(null);
-    setCurrentChatSessions([]);
+    try {
+      await hybridChatStorageService.deleteDayHistory(date);
+      loadDatesWithHistory();
+      setCurrentChatHistory(null);
+      setCurrentChatSessions([]);
+    } catch (error) {
+      console.warn('Error deleting history:', error);
+      // Could show a toast notification here if needed
+    }
   };
 
   const handleDeleteSession = async (sessionId: string) => {
-    await hybridChatStorageService.deleteChatSession(sessionId);
-    // Refresh the current date's sessions
-    const dateString = formatDateToString(selectedDate);
-    const sessions =
-      hybridChatStorageService.getChatSessionsForDate(dateString);
-    setCurrentChatSessions(sessions);
+    try {
+      await hybridChatStorageService.deleteChatSession(sessionId);
+      // Refresh the current date's sessions
+      const dateString = formatDateToString(selectedDate);
+      const sessions =
+        hybridChatStorageService.getChatSessionsForDate(dateString);
+      setCurrentChatSessions(sessions);
 
-    // Update chat history for backward compatibility
-    if (sessions.length > 0 && sessions[0]) {
-      const firstSession = sessions[0];
-      const chatHistory: ChatHistory = {
-        date: dateString,
-        messages: firstSession.messages,
-        summary: firstSession.summary || 'Tidak ada ringkasan',
-      };
-      setCurrentChatHistory(chatHistory);
-    } else {
-      setCurrentChatHistory(null);
+      // Update chat history for backward compatibility
+      if (sessions.length > 0 && sessions[0]) {
+        const firstSession = sessions[0];
+        const chatHistory: ChatHistory = {
+          date: dateString,
+          messages: firstSession.messages,
+          summary: firstSession.summary || 'Tidak ada ringkasan',
+        };
+        setCurrentChatHistory(chatHistory);
+      } else {
+        setCurrentChatHistory(null);
+      }
+
+      loadDatesWithHistory();
+    } catch (error) {
+      console.warn('Error deleting session:', error);
+      // Could show a toast notification here if needed
     }
-
-    loadDatesWithHistory();
   };
 
   const handleLoadSession = (session: ChatSession) => {

@@ -61,7 +61,7 @@ interface UseTTSChatReturn {
 }
 
 export function useTTSChat(options: UseTTSChatOptions = {}): UseTTSChatReturn {
-  const { autoInitialize = true, enableByDefault = false } = options;
+  const { autoInitialize = false, enableByDefault = false } = options;
 
   // State management
   const [isInitialized, setIsInitialized] = useState(false);

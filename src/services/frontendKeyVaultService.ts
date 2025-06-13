@@ -23,6 +23,7 @@
  * Service untuk mengakses Azure Key Vault melalui Azure Functions
  * Karena frontend tidak bisa langsung akses Key Vault, kita gunakan Azure Functions sebagai proxy
  */
+import { ENV_CONFIG, getApiEndpoint } from '../config/environment';
 import { logger } from '../utils/logger';
 import { authService } from './authService';
 
@@ -69,19 +70,18 @@ class FrontendKeyVaultService {
   private consecutiveSuccesses = 0; // track consecutive successes in half-open state
   private isHalfOpen = false; // half-open state tracking
   constructor() {
-    // Azure Functions URL - extract base URL from the endpoint
-    const endpoint =
-      import.meta.env['VITE_AZURE_FUNCTION_ENDPOINT'] ||
-      'http://localhost:7071/api/chat-completion' ||
-      'http://localhost:7071/api/get-secrets';
-    // Extract base URL (remove the specific endpoint path)
-    this.functionUrl =
-      endpoint.replace('/api/chat-completion', '') || 'http://localhost:7071';
+    // Use centralized environment configuration
+    const config = ENV_CONFIG;
+    this.functionUrl = config.functionBaseUrl || window.location.origin;
 
     // Log initialization status only once per session
     logger.once(
       'debug',
-      `FrontendKeyVaultService initialized with ${this.fallbackWarningsShown.size} cached warnings`
+      `FrontendKeyVaultService initialized - Environment: ${
+        config.isProduction ? 'Production' : 'Development'
+      }, Azure SWA: ${config.isAzureStaticWebApp}, Endpoint: ${
+        this.functionUrl
+      }`
     );
   }
   /**
@@ -262,7 +262,7 @@ class FrontendKeyVaultService {
       let response: Response;
       try {
         response = await fetch(
-          `${this.functionUrl}/api/get-secret?name=${secretName}`,
+          getApiEndpoint(`get-secret?name=${secretName}`),
           {
             method: 'GET',
             headers,
@@ -584,7 +584,7 @@ class FrontendKeyVaultService {
       const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
 
       const response = await fetch(
-        `${this.functionUrl}/api/get-secret?name=azure-cosmos-db-database-name`,
+        getApiEndpoint('get-secret?name=azure-cosmos-db-database-name'),
         {
           method: 'GET',
           headers: { 'Content-Type': 'application/json' },

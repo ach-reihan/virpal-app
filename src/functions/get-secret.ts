@@ -302,21 +302,38 @@ export async function getSecret(
   const timestamp = new Date().toISOString();
   const startTime = performance.now();
   // Minimal structured logging for production
-  context.info(`Key Vault secret request: ${request.method} ${requestId}`);
-  // Security: Add comprehensive CORS headers with flexible origin support
+  context.info(`Key Vault secret request: ${request.method} ${requestId}`); // Security: Add comprehensive CORS headers with flexible origin support
   const allowedOrigins = [
     'http://localhost:5173',
     'http://localhost:3000',
     'http://127.0.0.1:5173',
     'http://127.0.0.1:3000',
-    // Add production domain when deployed
-    // 'https://your-production-domain.com'
+    // Azure Static Web Apps domains
+    'https://ashy-coast-0aeebe10f.6.azurestaticapps.net',
+    // Allow any azurestaticapps.net subdomain for staging
+    /^https:\/\/.*\.azurestaticapps\.net$/,
   ];
 
   const origin = request.headers.get('origin');
-  const allowOrigin = allowedOrigins.includes(origin || '')
-    ? origin
-    : 'http://localhost:5173';
+  let allowOrigin = 'http://localhost:5173'; // default fallback
+
+  if (origin) {
+    // Check exact matches first
+    if (allowedOrigins.filter((o) => typeof o === 'string').includes(origin)) {
+      allowOrigin = origin;
+    } else {
+      // Check regex patterns
+      const regexOrigins = allowedOrigins.filter(
+        (o) => o instanceof RegExp
+      ) as RegExp[];
+      for (const pattern of regexOrigins) {
+        if (pattern.test(origin)) {
+          allowOrigin = origin;
+          break;
+        }
+      }
+    }
+  }
 
   const headers = {
     'Access-Control-Allow-Origin': allowOrigin || '*',

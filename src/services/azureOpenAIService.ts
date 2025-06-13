@@ -17,15 +17,14 @@
  * For licensing inquiries: reihan3000@gmail.com
  */
 
+import { getApiEndpoint } from '../config/environment';
 import type { OpenAIChatMessage } from '../types';
 import { logger } from '../utils/logger';
 
 // KONFIGURASI - SEKARANG MENGGUNAKAN AZURE FUNCTION SEBAGAI PROXY
 // Frontend tidak lagi langsung berkomunikasi dengan Azure OpenAI
-// Semua request diarahkan melalui Azure Function yang aman
-const AZURE_FUNCTION_ENDPOINT =
-  import.meta.env.VITE_AZURE_FUNCTION_ENDPOINT ||
-  'http://localhost:7071/api/chat-completion';
+// Menggunakan environment config terpusat untuk endpoint
+const AZURE_FUNCTION_ENDPOINT = getApiEndpoint('chat-completion');
 
 interface GetAzureOpenAICompletionOptions {
   systemPrompt?: string;
