@@ -1,14 +1,15 @@
 name: VirPal App Enterprise CI/CD Pipeline
 
 on:
-  push:
-    branches: [main, develop]
-    paths-ignore:
-      - '*.md'
-      - 'docs/**'
-      - '.vscode/**'
-  pull_request:
-    branches: [main]
+  # Temporarily disabled for Azure Static Web Apps focus
+  # push:
+  #   branches: [main, develop]
+  #   paths-ignore:
+  #     - '*.md'
+  #     - 'docs/**'
+  #     - '.vscode/**'
+  # pull_request:
+  #   branches: [main]
   workflow_dispatch:
     inputs:
       environment:

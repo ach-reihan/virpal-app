@@ -153,7 +153,6 @@ $RECYCLE.BIN/
 .directory
 
 # ===== 📦 PACKAGE MANAGERS =====
-package-lock.json
 yarn.lock
 pnpm-lock.yaml
 

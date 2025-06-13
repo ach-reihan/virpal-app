@@ -1,12 +1,14 @@
 name: 'CodeQL Analysis'
 
 on:
-  push:
-    branches: ['main', 'develop']
-  pull_request:
-    branches: ['main']
-  schedule:
-    - cron: '15 1 * * 0' # Weekly on Sundays
+  # Temporarily disabled for Azure Static Web Apps focus
+  # push:
+  #   branches: ['main', 'develop']
+  # pull_request:
+  #   branches: ['main']
+  # schedule:
+  #   - cron: '15 1 * * 0' # Weekly on Sundays
+  workflow_dispatch: # Manual trigger only
 
 jobs:
   analyze:
