@@ -61,13 +61,15 @@ jobs:
           ###### Repository/Build Configurations - These values can be configured to match your app requirements. ######
           # For more information regarding Static Web App workflow configurations, please visit: https://aka.ms/swaworkflowconfig
           app_location: '/' # App source code path
-          api_location: 'api' # Api source code path (built functions)
-          output_location: 'dist-frontend' # Built app content directory
+          api_location: 'api' # Api source code path (built functions)          output_location: 'dist-frontend' # Built app content directory
           github_id_token: ${{ steps.idtoken.outputs.result }}
           ###### End of Repository/Build Configurations ######
         env: # Frontend environment variables
-          VITE_AZURE_CLIENT_ID: ${{ secrets.VITE_AZURE_CLIENT_ID }}
-          VITE_AZURE_TENANT_ID: ${{ secrets.VITE_AZURE_TENANT_ID }}
+          VITE_MSAL_CLIENT_ID: ${{ secrets.VITE_MSAL_CLIENT_ID }}
+          VITE_TENANT_NAME: ${{ secrets.VITE_TENANT_NAME }}
+          VITE_TENANT_DOMAIN: ${{ secrets.VITE_TENANT_DOMAIN }}
+          VITE_USER_FLOW_NAME: ${{ secrets.VITE_USER_FLOW_NAME }}
+          VITE_BACKEND_SCOPE: ${{ secrets.VITE_BACKEND_SCOPE }}
           VITE_REDIRECT_URI: ${{ secrets.VITE_REDIRECT_URI }}
 
   close_pull_request_job:
