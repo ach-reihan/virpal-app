@@ -1,61 +1,101 @@
 # Docs for the Azure Web Apps Deploy action: https://github.com/azure/functions-action
 # More GitHub Actions for Azure: https://github.com/Azure/actions
 
-name: Build and deploy Node.js project to Azure Function App - virpal-production-func-gzvjkr7otps2w
+name: Build and deploy VirPal App Azure Functions - Production
 
 on:
   push:
     branches:
       - main
+    paths:
+      - 'api/**'
+      - 'src/functions/**'
+      - 'scripts/setup-functions.cjs'
+      - '.github/workflows/**'
   workflow_dispatch:
 
 env:
-  AZURE_FUNCTIONAPP_PACKAGE_PATH: '.' # set this to the path to your web app project, defaults to the repository root
-  NODE_VERSION: '20.x' # set this to the node version to use (supports 8.x, 10.x, 12.x)
+  AZURE_FUNCTIONAPP_PACKAGE_PATH: './api' # VirPal Azure Functions directory
+  NODE_VERSION: '20.x' # Node.js version for Azure Functions v4
 
 jobs:
   build:
     runs-on: windows-latest
     permissions:
-      contents: read #This is required for actions/checkout
-      
+      contents: read # Required for actions/checkout
+
     steps:
-      - name: 'Checkout GitHub Action'
+      - name: 'Checkout VirPal App Repository'
         uses: actions/checkout@v4
 
-      - name: Setup Node ${{ env.NODE_VERSION }} Environment
-        uses: actions/setup-node@v3
+      - name: Setup Node.js ${{ env.NODE_VERSION }} Environment
+        uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
 
-      - name: 'Resolve Project Dependencies Using Npm'
+      - name: 'Install Root Dependencies'
         shell: pwsh
         run: |
-          pushd './${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}'
+          Write-Host "Installing root dependencies..."
           npm install
-          npm run build --if-present
-          npm run test --if-present
-          popd
+
+      - name: 'Build VirPal App Functions'
+        shell: pwsh
+        run: |
+          Write-Host "Building VirPal App Azure Functions..."
+          npm run build:functions
+
+      - name: 'Verify API Directory Structure'
+        shell: pwsh
+        run: |
+          Write-Host "Verifying API directory structure..."
+          Get-ChildItem -Path "./api" -Recurse | Select-Object Name, FullName | Format-Table
+
+          Write-Host "Checking package.json in API directory..."
+          if (Test-Path "./api/package.json") {
+            Write-Host "✅ package.json found in API directory"
+            Get-Content "./api/package.json" | ConvertFrom-Json | ConvertTo-Json -Depth 3
+          } else {
+            Write-Host "❌ package.json NOT found in API directory"
+            exit 1
+          }
 
       - name: Upload artifact for deployment job
         uses: actions/upload-artifact@v4
         with:
-          name: node-app
-          path: .
-
+          name: virpal-functions-app
+          path: ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
   deploy:
     runs-on: windows-latest
     needs: build
     permissions:
-      id-token: write #This is required for requesting the JWT
-      contents: read #This is required for actions/checkout
+      id-token: write # Required for requesting the JWT
+      contents: read # Required for actions/checkout
 
     steps:
-      - name: Download artifact from build job
+      - name: Download VirPal Functions artifact from build job
         uses: actions/download-artifact@v4
         with:
-          name: node-app
-      
+          name: virpal-functions-app
+          path: ./api
+
+      - name: 'Verify Downloaded Artifact Structure'
+        shell: pwsh
+        run: |
+          Write-Host "Downloaded artifact structure:"
+          Get-ChildItem -Path "./api" -Recurse | Select-Object Name, FullName | Format-Table
+
+          Write-Host "Checking for required files..."
+          @("package.json", "host.json", "index.js") | ForEach-Object {
+            $file = "./api/$_"
+            if (Test-Path $file) {
+              Write-Host "✅ $_ found"
+            } else {
+              Write-Host "❌ $_ NOT found"
+            }
+          }
+
       - name: Login to Azure
         uses: azure/login@v2
         with:
@@ -63,11 +103,11 @@ jobs:
           tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_255429F359F047698182A276E22B4DD9 }}
           subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_D4D21766AB8E4948B3E3A97A86C0CF5C }}
 
-      - name: 'Run Azure Functions Action'
+      - name: 'Deploy VirPal App to Azure Functions'
         uses: Azure/functions-action@v1
         id: fa
         with:
           app-name: 'virpal-production-func-gzvjkr7otps2w'
           slot-name: 'Production'
-          package: ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
-          
+          package: './api'
+          respect-funcignore: true
