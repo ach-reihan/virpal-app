@@ -4,14 +4,16 @@
   "platform": {
     "apiRuntime": "node:20"
   },
+  "apiLocation": "",
   "routes": [
     {
       "route": "/api/*",
-      "allowedRoles": ["anonymous"]
+      "allowedRoles": ["anonymous"],
+      "rewrite": "https://virpal-production-func-gzvjkr7otps2w.azurewebsites.net/api/{path}"
     },
     {
       "route": "/*",
-      "serve": "/index.html",
+      "rewrite": "/index.html",
       "statusCode": 200
     }
   ],

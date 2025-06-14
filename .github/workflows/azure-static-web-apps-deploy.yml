@@ -1,0 +1,73 @@
+name: Deploy VirPal App to Azure Static Web Apps
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'src/**'
+      - 'public/**'
+      - 'index.html'
+      - 'package.json'
+      - 'vite.config.ts'
+      - 'staticwebapp.config.json'
+      - '.github/workflows/azure-static-web-apps-deploy.yml'
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build_and_deploy_job:
+    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.action != 'closed')
+    runs-on: ubuntu-latest
+    name: Build and Deploy VirPal Frontend
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+          lfs: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build VirPal Frontend
+        run: npm run build:frontend
+        env:
+          VITE_MSAL_CLIENT_ID: ${{ secrets.VITE_MSAL_CLIENT_ID }}
+          VITE_TENANT_NAME: ${{ secrets.VITE_TENANT_NAME }}
+          VITE_TENANT_DOMAIN: ${{ secrets.VITE_TENANT_DOMAIN }}
+          VITE_USER_FLOW_NAME: ${{ secrets.VITE_USER_FLOW_NAME }}
+          VITE_BACKEND_SCOPE: ${{ secrets.VITE_BACKEND_SCOPE }}
+          VITE_REDIRECT_URI: ${{ secrets.VITE_REDIRECT_URI }}
+
+      - name: Build And Deploy to Azure Static Web Apps
+        id: builddeploy
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          action: 'upload'
+          app_location: '/'
+          output_location: 'dist-frontend'
+          skip_api_build: true
+          api_location: ''
+  close_pull_request_job:
+    if: github.event_name == 'pull_request' && github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    name: Close Pull Request Job
+    steps:
+      - name: Close Pull Request
+        id: closepullrequest
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+          action: 'close'
+          app_location: '/'

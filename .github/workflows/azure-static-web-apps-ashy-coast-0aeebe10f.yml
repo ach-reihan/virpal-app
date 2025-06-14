@@ -1,13 +1,15 @@
-name: Azure Static Web Apps CI/CD
+name: Azure Static Web Apps CI/CD (DISABLED - Using azure-static-web-apps-deploy.yml instead)
 
+# WORKFLOW DISABLED - This workflow is disabled in favor of azure-static-web-apps-deploy.yml
+# To re-enable, remove the condition below
 on:
   push:
     branches:
-      - main
+      - never-trigger # Changed from 'main' to disable
   pull_request:
     types: [opened, synchronize, reopened, closed]
     branches:
-      - main
+      - never-trigger # Changed from 'main' to disable
 
 jobs:
   build_and_deploy_job:
