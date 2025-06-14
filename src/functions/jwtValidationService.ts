@@ -169,15 +169,14 @@ class JWTValidationService {
 
       // Get signing key
       const signingKey = await this.getSigningKey(kid);
-
       // JWT verification options
       const verifyOptions: jwt.VerifyOptions = {
         algorithms: ['RS256'],
         audience: this.config.audience || this.config.clientId,
-        // For CIAM tokens, issuer includes the user flow
+        // For CIAM tokens, issuer does not include user flow
         issuer:
           this.config.issuer ||
-          `https://${this.config.tenantName}.ciamlogin.com/${this.config.tenantId}/${this.config.userFlow}/v2.0/`,
+          `https://${this.config.tenantId}.ciamlogin.com/${this.config.tenantId}/v2.0`,
         clockTolerance: 60, // 60 seconds tolerance for clock skew
       };
 
@@ -272,14 +271,12 @@ class JWTValidationService {
         isValid: false,
         error: 'Token not yet valid',
       };
-    }
-
-    // Validate issuer format (updated for CIAM with user flow)
-    const expectedIssuerPattern = new RegExp(
-      `https://${this.config.tenantName}\\.ciamlogin\\.com/.*/v2\\.0/`
-    );
-    if (!expectedIssuerPattern.test(claims.iss)) {
-      context.warn(`Invalid token issuer: ${claims.iss}`);
+    } // Validate issuer format (updated for CIAM)
+    const expectedIssuer = `https://${this.config.tenantId}.ciamlogin.com/${this.config.tenantId}/v2.0`;
+    if (claims.iss !== expectedIssuer) {
+      context.warn(
+        `Invalid token issuer: ${claims.iss}, expected: ${expectedIssuer}`
+      );
       return {
         isValid: false,
         error: 'Invalid token issuer',
@@ -362,26 +359,29 @@ class JWTValidationService {
  */
 export function createJWTService(): JWTValidationService {
   const config: JWTServiceConfig = {
-    tenantName: process.env['AZURE_TENANT_NAME'] || '',
-    tenantId: process.env['AZURE_TENANT_ID'] || '',
-    clientId: process.env['AZURE_BACKEND_CLIENT_ID'] || '',
+    tenantName: process.env['AZURE_TENANT_NAME'] || 'virpalapp',
+    tenantId:
+      process.env['AZURE_TENANT_ID'] || 'db0374b9-bb6f-4410-ad04-db7fe70f4d7b',
+    clientId:
+      process.env['AZURE_BACKEND_CLIENT_ID'] ||
+      '9ae4699e-0823-453e-b0f7-b614491a80a2',
     userFlow: process.env['AZURE_USER_FLOW'] || '',
-    // Use CIAM endpoints - will be constructed from environment variables
+    // Use CIAM endpoints without user flow (External ID uses different format)
     jwksUri: `https://${
-      process.env['AZURE_TENANT_NAME'] || 'your-tenant'
+      process.env['AZURE_TENANT_NAME'] || 'virpalapp'
     }.ciamlogin.com/${
-      process.env['AZURE_TENANT_ID'] || 'your-tenant.onmicrosoft.com'
-    }/discovery/v2.0/keys?p=${
-      process.env['AZURE_USER_FLOW'] || 'your-user-flow'
-    }`,
-    // Issuer includes user flow for CIAM tokens
+      process.env['AZURE_TENANT_ID'] || 'db0374b9-bb6f-4410-ad04-db7fe70f4d7b'
+    }/discovery/v2.0/keys`,
+    // Issuer for CIAM (External ID) tokens - no user flow
     issuer: `https://${
-      process.env['AZURE_TENANT_NAME'] || 'your-tenant'
+      process.env['AZURE_TENANT_ID'] || 'db0374b9-bb6f-4410-ad04-db7fe70f4d7b'
     }.ciamlogin.com/${
-      process.env['AZURE_TENANT_ID'] || 'your-tenant.onmicrosoft.com'
-    }/${process.env['AZURE_USER_FLOW'] || 'your-user-flow'}/v2.0/`,
-    // For CIAM, audience should be the frontend client ID that requested the token
-    audience: process.env['AZURE_FRONTEND_CLIENT_ID'] || '',
+      process.env['AZURE_TENANT_ID'] || 'db0374b9-bb6f-4410-ad04-db7fe70f4d7b'
+    }/v2.0`,
+    // For CIAM, audience should be the backend API client ID
+    audience:
+      process.env['AZURE_BACKEND_CLIENT_ID'] ||
+      '9ae4699e-0823-453e-b0f7-b614491a80a2',
   };
 
   // Validate configuration
