@@ -82,6 +82,7 @@ Run the production preparation script:
 ```
 
 This will:
+
 1. Update CORS settings for production
 2. Build frontend assets
 3. Build Azure Functions
@@ -129,26 +130,158 @@ az staticwebapp appsettings set --name $staticWebAppName --resource-group $resou
 
 ## Troubleshooting
 
-### CORS Issues
+### Common Issues and Solutions
 
-If you encounter CORS issues:
+#### 1. API Endpoints Returning 404/500 Errors
 
-1. Verify your Static Web App URL is included in the `allowedOrigins` section of your Function App's `host.json`
-2. Check that your browser is making requests to the correct Function App URL
-3. Make sure the `allowedHeaders` include any custom headers your application is using
+**Symptoms**: API calls to `/api/health`, `/api/get-secret`, or `/api/chat-completion` return 404 or 500 errors.
 
-### Authentication Issues
+**Solutions**:
 
-If Key Vault authentication fails:
+```pwsh
+# Use the production health check script
+.\scripts\production-health-check.ps1
 
-1. Verify the Managed Identity for your Function App has proper access to the Key Vault
-2. Check that the KEY_VAULT_URL application setting is correct
-3. Make sure the secrets exist in the Key Vault with the expected names
+# Check Azure Functions deployment status
+az staticwebapp show -n $staticWebAppName -g $resourceGroup --query "buildProperties"
+
+# Verify functions are deployed
+az staticwebapp functions list -n $staticWebAppName -g $resourceGroup
+```
+
+**Common Causes**:
+
+- Environment variables not set in Azure Static Web Apps
+- Functions not properly built or deployed
+- Incorrect `staticwebapp.config.json` configuration
+
+#### 2. Environment Variables Issues
+
+**Check Environment Variables**:
+
+```pwsh
+# List current app settings
+az staticwebapp appsettings list -n $staticWebAppName -g $resourceGroup
+
+# Set missing environment variables
+az staticwebapp appsettings set -n $staticWebAppName -g $resourceGroup --setting-names KEY_VAULT_URL="https://your-keyvault.vault.azure.net/"
+```
+
+**Required Environment Variables**:
+
+- `KEY_VAULT_URL`: Your Azure Key Vault URL
+- `AZURE_OPENAI_ENDPOINT`: Your Azure OpenAI endpoint
+- `AZURE_OPENAI_API_KEY`: Your Azure OpenAI API key
+- `COSMOS_DB_CONNECTION_STRING`: Your Cosmos DB connection string
+
+#### 3. Azure Functions Build Issues
+
+**Rebuild Functions**:
+
+```pwsh
+# Clean and rebuild
+npm run clean:dist
+npm run functions:build
+
+# Check built files
+ls api/functions/
+```
+
+**Verify Function Configuration**:
+
+- Ensure all functions have `authLevel: 'anonymous'`
+- Remove any `route` properties (not supported in SWA)
+- Check `host.json` configuration
+
+#### 4. Key Vault Access Issues
+
+**Check Managed Identity**:
+
+```pwsh
+# Verify managed identity is enabled
+az staticwebapp identity show -n $staticWebAppName -g $resourceGroup
+
+# Grant Key Vault access
+$principalId = az staticwebapp identity show -n $staticWebAppName -g $resourceGroup --query "principalId" -o tsv
+az keyvault set-policy --name $keyVaultName --object-id $principalId --secret-permissions get list
+```
+
+#### 5. CORS Issues
+
+**Update CORS Settings**:
+
+```pwsh
+# Update staticwebapp.config.json
+# Ensure API routes allow anonymous access:
+{
+  "routes": [
+    {
+      "route": "/api/*",
+      "allowedRoles": ["anonymous"]
+    }
+  ]
+}
+```
+
+### Diagnostic Tools
+
+#### Health Check Script
+
+Run the comprehensive health check:
+
+```pwsh
+.\scripts\production-health-check.ps1
+```
+
+#### Azure Diagnostics
+
+```pwsh
+# Run Azure SWA diagnostics
+.\scripts\azure-swa-diagnostic.ps1 -ResourceGroupName $resourceGroup -StaticWebAppName $staticWebAppName
+
+# Check deployment logs
+az staticwebapp show -n $staticWebAppName -g $resourceGroup --query "deployments"
+```
+
+#### Local vs Production Comparison
+
+```pwsh
+# Test local functions
+func start
+
+# Test specific endpoints locally
+curl http://localhost:7071/api/health
+curl -X POST http://localhost:7071/api/get-secret -H "Content-Type: application/json" -d '{"secretName": "test"}'
+
+# Compare with production
+curl https://your-app.azurestaticapps.net/api/health
+```
 
 ### Performance Optimization
 
 For better performance:
 
-1. Enable Azure CDN for your Static Web App
-2. Configure Function App scaling based on your expected load
-3. Consider using Premium Functions for better cold start performance
+1. **Enable Azure CDN** for your Static Web App
+2. **Configure Function App scaling** based on your expected load
+3. **Use Premium Functions** for better cold start performance
+4. **Optimize bundle size** by code splitting
+5. **Enable compression** in `staticwebapp.config.json`
+
+### Monitoring and Logging
+
+#### Application Insights
+
+```pwsh
+# Enable Application Insights
+az monitor app-insights component create --app $staticWebAppName-insights --location $location --resource-group $resourceGroup
+
+# Link to Static Web App
+az staticwebapp appsettings set -n $staticWebAppName -g $resourceGroup --setting-names APPLICATIONINSIGHTS_CONNECTION_STRING="your-connection-string"
+```
+
+#### Log Analysis
+
+```pwsh
+# Query logs using Azure CLI
+az monitor app-insights query --app $staticWebAppName-insights --analytics-query "requests | where timestamp > ago(1h)"
+```

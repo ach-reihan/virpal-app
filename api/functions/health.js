@@ -248,8 +248,7 @@ async function checkService(name, checkFn, timeoutMs) {
 // Register the function with enhanced configuration
 app.http('health', {
     methods: ['GET', 'HEAD'],
-    authLevel: 'function', // Function level security for production
-    route: 'health',
+    authLevel: 'anonymous', // Anonymous access for Azure SWA compatibility
     handler: health,
 });
 //# sourceMappingURL=health.js.map

@@ -570,6 +570,6 @@ export async function getSecret(
 // Register the function
 app.http('get-secret', {
   methods: ['GET', 'OPTIONS'],
-  authLevel: 'function', // Function level security for production
+  authLevel: 'anonymous', // Anonymous access for Azure SWA compatibility
   handler: getSecret,
 });

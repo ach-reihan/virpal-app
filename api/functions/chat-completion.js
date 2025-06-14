@@ -455,7 +455,7 @@ export async function chatCompletionHandler(request, context) {
 // Register the function with Azure Functions runtime
 app.http('chat-completion', {
     methods: ['POST', 'OPTIONS'],
-    authLevel: 'function', // Using function level auth for security
+    authLevel: 'anonymous', // Anonymous access for Azure SWA compatibility
     handler: chatCompletionHandler,
 });
 //# sourceMappingURL=chat-completion.js.map
