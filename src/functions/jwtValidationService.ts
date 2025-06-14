@@ -157,23 +157,55 @@ class JWTValidationService {
     try {
       // Debug: Log token validation start
       context.log('=== JWT TOKEN VALIDATION START ===');
-      context.log(`Token length: ${token?.length || 0}`);
-
-      // Manual decode header untuk debugging
+      context.log(`Token length: ${token?.length || 0}`); // Manual decode header (primary method - more reliable)
+      let kid: string;
       try {
         const tokenParts = token.split('.');
-        if (tokenParts.length === 3 && tokenParts[0]) {
-          const headerBuffer = Buffer.from(tokenParts[0], 'base64');
-          const headerJson = headerBuffer.toString('utf8');
-          const headerObj = JSON.parse(headerJson);
-          context.log('Manual decoded header:', JSON.stringify(headerObj));
-          context.log(`Manual decoded kid: ${headerObj.kid}`);
+        if (tokenParts.length !== 3) {
+          throw new Error('Invalid JWT format - must have 3 parts');
         }
+
+        // Validate that first part exists
+        const headerPart = tokenParts[0];
+        if (!headerPart) {
+          throw new Error('Invalid JWT format - missing header part');
+        }
+
+        // Try different base64 decode approaches
+        let headerObj: any;
+        try {
+          // Method 1: Direct decode
+          const headerBuffer = Buffer.from(headerPart, 'base64');
+          const headerJson = headerBuffer.toString('utf8');
+          headerObj = JSON.parse(headerJson);
+        } catch (firstTry) {
+          // Method 2: With padding
+          const padded =
+            headerPart + '='.repeat((4 - (headerPart.length % 4)) % 4);
+          const headerBuffer = Buffer.from(padded, 'base64');
+          const headerJson = headerBuffer.toString('utf8');
+          headerObj = JSON.parse(headerJson);
+        }
+
+        context.log('Manual decoded header:', JSON.stringify(headerObj));
+
+        if (!headerObj.kid) {
+          context.error('JWT header missing kid:', JSON.stringify(headerObj));
+          return {
+            isValid: false,
+            error: 'Invalid token: missing key ID (kid) in header',
+          };
+        }
+
+        kid = headerObj.kid;
+        context.log(`✅ Manual decode found kid: ${kid}`);
       } catch (manualDecodeError) {
         context.error('Manual header decode failed:', manualDecodeError);
-      }
-
-      // Decode token header untuk mendapatkan kid
+        return {
+          isValid: false,
+          error: 'Invalid JWT format - failed to decode header',
+        };
+      } // Decode token header untuk debugging (secondary method)
       const decodedHeader = jwt.decode(token, { complete: true });
 
       context.log(
@@ -181,42 +213,16 @@ class JWTValidationService {
         JSON.stringify(decodedHeader?.header || {})
       );
       context.log(
-        'JWT library decoded payload preview:',
+        'JWT library vs manual kid comparison:',
         JSON.stringify({
-          aud: (decodedHeader?.payload as JwtPayload)?.aud,
-          iss: (decodedHeader?.payload as JwtPayload)?.iss,
-          kid_from_header: decodedHeader?.header?.kid,
+          manual_kid: kid,
+          library_kid: decodedHeader?.header?.kid,
+          match: kid === decodedHeader?.header?.kid,
         })
       );
 
-      if (!decodedHeader) {
-        context.error('Failed to decode JWT token');
-        return {
-          isValid: false,
-          error: 'Invalid token: failed to decode',
-        };
-      }
-
-      if (!decodedHeader.header) {
-        context.error('JWT token missing header');
-        return {
-          isValid: false,
-          error: 'Invalid token: missing header',
-        };
-      }
-
-      if (!decodedHeader.header.kid) {
-        context.error(
-          'JWT header missing kid:',
-          JSON.stringify(decodedHeader.header)
-        );
-        return {
-          isValid: false,
-          error: 'Invalid token: missing key ID (kid) in header',
-        };
-      }
-
-      const kid = decodedHeader.header.kid;
+      // Use manual decoded kid (more reliable)
+      context.log(`Using kid from manual decode: ${kid}`);
       context.log(`Found kid in token header: ${kid}`);
 
       // Get signing key
