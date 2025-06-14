@@ -97,7 +97,9 @@ export const isToday = (dateString: string): boolean => {
  */
 export const getRelativeDateDescription = (dateString: string): string => {
   const today = getTodayString();
-  const yesterday = formatDateToString(new Date(Date.now() - 24 * 60 * 60 * 1000));
+  const yesterday = formatDateToString(
+    new Date(Date.now() - 24 * 60 * 60 * 1000)
+  );
 
   if (dateString === today) {
     return 'Hari ini';
@@ -110,7 +112,7 @@ export const getRelativeDateDescription = (dateString: string): string => {
         weekday: 'long',
         year: 'numeric',
         month: 'long',
-        day: 'numeric'
+        day: 'numeric',
       });
     }
     return dateString;

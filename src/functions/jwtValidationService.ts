@@ -39,11 +39,11 @@
  * - Type safety dengan interfaces
  */
 
-import jwt from 'jsonwebtoken';
 import type { JwtPayload } from 'jsonwebtoken';
+import jwt from 'jsonwebtoken';
 // Use jwks-rsa instead of jwks-client
-import jwksClient from 'jwks-rsa';
 import type { InvocationContext } from '@azure/functions';
+import jwksClient from 'jwks-rsa';
 
 /**
  * JWT Claims Interface untuk Azure B2C

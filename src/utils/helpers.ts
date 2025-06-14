@@ -32,14 +32,23 @@ export const getAvatarImageUrl = (expression: AvatarExpression): string => {
     ['confused', '/images/avatar-confused.png'],
   ]);
 
-  return imageMap.get(expression) || imageMap.get('neutral') || '/images/avatar-neutral.png';
+  return (
+    imageMap.get(expression) ||
+    imageMap.get('neutral') ||
+    '/images/avatar-neutral.png'
+  );
 };
 
 // Helper function untuk menentukan ekspresi berdasarkan respons AI
-export const determineExpressionFromResponse = (responseText: string): AvatarExpression => {
-  if (responseText.includes("prihatin") || responseText.includes("sedih")) {
+export const determineExpressionFromResponse = (
+  responseText: string
+): AvatarExpression => {
+  if (responseText.includes('prihatin') || responseText.includes('sedih')) {
     return 'sad';
-  } else if (responseText.includes("bantu") || responseText.includes("mendengar")) {
+  } else if (
+    responseText.includes('bantu') ||
+    responseText.includes('mendengar')
+  ) {
     return 'listening';
   }
   return 'neutral';

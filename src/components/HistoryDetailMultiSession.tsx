@@ -18,7 +18,7 @@
  */
 
 import React from 'react';
-import type { ChatSession, ChatHistory } from '../types';
+import type { ChatHistory, ChatSession } from '../types';
 import ChatBubble from './ChatBubble';
 
 interface HistoryDetailMultiSessionProps {

@@ -28,12 +28,12 @@ export type MessageSender = 'user' | 'virpal';
  * Setiap pesan akan memiliki struktur ini.
  */
 export interface ChatMessage {
-  id: string;          // ID unik untuk setiap pesan, berguna untuk React key.
+  id: string; // ID unik untuk setiap pesan, berguna untuk React key.
   sender: MessageSender; // Siapa pengirim pesan.
-  text: string;          // Isi teks dari pesan.
-  timestamp: Date;       // Waktu kapan pesan dikirim atau diterima.
-  audioUrl?: string;      // Opsional: URL ke file audio TTS untuk pesan dari Virpal.
-  isLoading?: boolean;    // Opsional: Menandakan apakah pesan ini (dari Virpal) masih dalam proses loading/generating.
+  text: string; // Isi teks dari pesan.
+  timestamp: Date; // Waktu kapan pesan dikirim atau diterima.
+  audioUrl?: string; // Opsional: URL ke file audio TTS untuk pesan dari Virpal.
+  isLoading?: boolean; // Opsional: Menandakan apakah pesan ini (dari Virpal) masih dalam proses loading/generating.
 }
 
 /**
@@ -41,13 +41,13 @@ export interface ChatMessage {
  * Ini bisa digunakan untuk mengubah tampilan visual avatar.
  */
 export type AvatarExpression =
-  | 'neutral'    // Ekspresi netral atau default.
-  | 'happy'      // Ekspresi senang atau positif.
-  | 'thinking'   // Ekspresi sedang berpikir atau memproses.
-  | 'sad'        // Ekspresi sedih atau prihatin.
-  | 'listening'  // Ekspresi sedang mendengarkan atau memperhatikan.
-  | 'surprised'  // Ekspresi kaget atau terkejut (opsional).
-  | 'confused';  // Ekspresi bingung (opsional).
+  | 'neutral' // Ekspresi netral atau default.
+  | 'happy' // Ekspresi senang atau positif.
+  | 'thinking' // Ekspresi sedang berpikir atau memproses.
+  | 'sad' // Ekspresi sedih atau prihatin.
+  | 'listening' // Ekspresi sedang mendengarkan atau memperhatikan.
+  | 'surprised' // Ekspresi kaget atau terkejut (opsional).
+  | 'confused'; // Ekspresi bingung (opsional).
 
 /**
  * Opsional: Jika kamu ingin menyimpan state mood pengguna secara eksplisit.
@@ -75,9 +75,10 @@ export interface OpenAIChatMessage {
  */
 export interface VirpalPersonality {
   id: string;
-  name: string;          // Nama kepribadian (misal: "Ceria dan Suportif", "Kalem dan Analitis")
-  prompt: string;        // Prompt sistem untuk OpenAI yang mendefinisikan kepribadian ini.
-  avatarExpressions?: {  // Kustomisasi path gambar avatar untuk kepribadian ini (jika berbeda)
+  name: string; // Nama kepribadian (misal: "Ceria dan Suportif", "Kalem dan Analitis")
+  prompt: string; // Prompt sistem untuk OpenAI yang mendefinisikan kepribadian ini.
+  avatarExpressions?: {
+    // Kustomisasi path gambar avatar untuk kepribadian ini (jika berbeda)
     neutral?: string;
     happy?: string;
     // ... ekspresi lainnya

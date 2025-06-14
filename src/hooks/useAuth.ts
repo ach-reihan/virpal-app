@@ -259,8 +259,8 @@ export function useAuth(options: UseAuthOptions = {}): UseAuthReturn {
         logger.warn('Authentication state check failed during initialization');
         // Continue with default values
       }
-      let accessToken: string | null = null;
-      let tokenInfo: TokenInfo | null = null;
+      const accessToken: string | null = null;
+      const tokenInfo: TokenInfo | null = null;
       // Skip token operations during initialization to prevent CORS errors
       // Tokens will be fetched when user explicitly logs in or requests them
       if (isAuthenticated && user) {

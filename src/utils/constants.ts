@@ -28,10 +28,12 @@ export const WELCOME_MESSAGE: ChatMessage = {
 };
 
 // System prompt untuk Azure OpenAI
-export const SYSTEM_PROMPT = "Kamu adalah asisten virtual yang ramah dan membantu.";
+export const SYSTEM_PROMPT =
+  'Kamu adalah asisten virtual yang ramah dan membantu.';
 
 // Error message ketika ada gangguan
-export const ERROR_MESSAGE = 'Ups, sepertinya ada sedikit gangguan di jaringanku. Bisa coba ulangi lagi?';
+export const ERROR_MESSAGE =
+  'Ups, sepertinya ada sedikit gangguan di jaringanku. Bisa coba ulangi lagi?';
 
 // Styles untuk komponen
 export const APP_STYLES = {

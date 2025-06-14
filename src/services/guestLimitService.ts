@@ -52,8 +52,10 @@ class GuestLimitService {
       const limits: GuestLimits = JSON.parse(stored);
 
       // Reset jika sudah lebih dari 24 jam
-      if (limits.firstChatTimestamp &&
-          Date.now() - limits.firstChatTimestamp > this.RESET_PERIOD) {
+      if (
+        limits.firstChatTimestamp &&
+        Date.now() - limits.firstChatTimestamp > this.RESET_PERIOD
+      ) {
         logger.info('Guest limits reset after 24 hours');
         return this.createDefaultLimits();
       }
@@ -73,7 +75,7 @@ class GuestLimitService {
       maxChatMessages: this.MAX_CHAT_MESSAGES,
       currentChatCount: 0,
       firstChatTimestamp: null,
-      canUseTTS: false
+      canUseTTS: false,
     };
 
     this.saveLimits(limits);
@@ -113,7 +115,9 @@ class GuestLimitService {
     limits.currentChatCount++;
     this.saveLimits(limits);
 
-    logger.info(`Guest message count incremented to ${limits.currentChatCount}/${limits.maxChatMessages}`);
+    logger.info(
+      `Guest message count incremented to ${limits.currentChatCount}/${limits.maxChatMessages}`
+    );
   }
 
   /**

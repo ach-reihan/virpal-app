@@ -23,8 +23,8 @@ import ErrorBoundary from './components/ErrorBoundary.tsx';
 import './styles/index.css';
 
 // Import development tools untuk debugging
-import './utils/keyVaultTester';
 import './utils/globalDevTools';
+import './utils/keyVaultTester';
 
 const rootElement = document.getElementById('root');
 if (!rootElement) throw new Error('Root element not found');
