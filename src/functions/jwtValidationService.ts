@@ -42,7 +42,6 @@
 import type { JwtPayload } from 'jsonwebtoken';
 import jwt from 'jsonwebtoken';
 // Use jwks-rsa instead of jwks-client
-import type { InvocationContext } from '@azure/functions';
 import jwksClient from 'jwks-rsa';
 
 /**
@@ -150,89 +149,34 @@ class JWTValidationService {
   }
   /**
    * Validate JWT token
-   */ async validateToken(
-    token: string,
-    context: InvocationContext
-  ): Promise<TokenValidationResult> {
+   */ async validateToken(token: string): Promise<TokenValidationResult> {
     try {
-      // Debug: Log token validation start
-      context.log('=== JWT TOKEN VALIDATION START ===');
-      context.log(`Token length: ${token?.length || 0}`); // Manual decode header (primary method - more reliable)
-      let kid: string;
-      try {
-        const tokenParts = token.split('.');
-        if (tokenParts.length !== 3) {
-          throw new Error('Invalid JWT format - must have 3 parts');
-        }
+      // Simplified approach: Use only jwt.decode() but with proper error handling
+      const decodedToken = jwt.decode(token, { complete: true });
 
-        // Validate that first part exists
-        const headerPart = tokenParts[0];
-        if (!headerPart) {
-          throw new Error('Invalid JWT format - missing header part');
-        }
-
-        // Try different base64 decode approaches
-        let headerObj: any;
-        try {
-          // Method 1: Direct decode
-          const headerBuffer = Buffer.from(headerPart, 'base64');
-          const headerJson = headerBuffer.toString('utf8');
-          headerObj = JSON.parse(headerJson);
-        } catch (firstTry) {
-          // Method 2: With padding
-          const padded =
-            headerPart + '='.repeat((4 - (headerPart.length % 4)) % 4);
-          const headerBuffer = Buffer.from(padded, 'base64');
-          const headerJson = headerBuffer.toString('utf8');
-          headerObj = JSON.parse(headerJson);
-        }
-
-        context.log('Manual decoded header:', JSON.stringify(headerObj));
-
-        if (!headerObj.kid) {
-          context.error('JWT header missing kid:', JSON.stringify(headerObj));
-          return {
-            isValid: false,
-            error: 'Invalid token: missing key ID (kid) in header',
-          };
-        }
-
-        kid = headerObj.kid;
-        context.log(`✅ Manual decode found kid: ${kid}`);
-      } catch (manualDecodeError) {
-        context.error('Manual header decode failed:', manualDecodeError);
+      if (!decodedToken || typeof decodedToken === 'string') {
         return {
           isValid: false,
-          error: 'Invalid JWT format - failed to decode header',
+          error: 'Invalid JWT format - failed to decode token',
         };
-      } // Decode token header untuk debugging (secondary method)
-      const decodedHeader = jwt.decode(token, { complete: true });
+      }
 
-      context.log(
-        'JWT library decoded header:',
-        JSON.stringify(decodedHeader?.header || {})
-      );
-      context.log(
-        'JWT library vs manual kid comparison:',
-        JSON.stringify({
-          manual_kid: kid,
-          library_kid: decodedHeader?.header?.kid,
-          match: kid === decodedHeader?.header?.kid,
-        })
-      );
-
-      // Use manual decoded kid (more reliable)
-      context.log(`Using kid from manual decode: ${kid}`);
-      context.log(`Found kid in token header: ${kid}`);
+      // Extract kid from header
+      const kid = decodedToken.header?.kid;
+      if (!kid) {
+        return {
+          isValid: false,
+          error: 'Invalid token: missing key ID (kid) in header',
+        };
+      }
 
       // Get signing key
-      context.log('Getting signing key for kid:', kid);
       const signingKey = await this.getSigningKey(kid);
+
       // JWT verification options
       const verifyOptions: jwt.VerifyOptions = {
         algorithms: ['RS256'],
         audience: this.config.audience || this.config.clientId,
-        // For CIAM tokens, issuer does not include user flow
         issuer:
           this.config.issuer ||
           `https://${this.config.tenantId}.ciamlogin.com/${this.config.tenantId}/v2.0`,
@@ -244,10 +188,8 @@ class JWTValidationService {
         token,
         signingKey,
         verifyOptions
-      ) as B2CTokenClaims;
-
-      // Additional validation
-      const validationResult = this.validateClaims(decoded, context);
+      ) as B2CTokenClaims; // Additional validation
+      const validationResult = this.validateClaims(decoded);
       if (!validationResult.isValid) {
         return validationResult;
       }
@@ -270,11 +212,6 @@ class JWTValidationService {
         errorMessage = 'Invalid token format';
       } else if (error instanceof jwt.NotBeforeError) {
         errorMessage = 'Token not active yet';
-      } else {
-        context.error(
-          'JWT validation error:',
-          error instanceof Error ? error.message : 'Unknown error'
-        );
       }
 
       return {
@@ -285,31 +222,7 @@ class JWTValidationService {
   }
   /**
    * Validate token claims
-   */ private validateClaims(
-    claims: B2CTokenClaims,
-    context: InvocationContext
-  ): TokenValidationResult {
-    // Debug: Log claims validation
-    context.log('=== JWT CLAIMS VALIDATION DEBUG ===');
-    context.log('Received claims:');
-    context.log(`- aud: ${JSON.stringify(claims.aud)}`);
-    context.log(`- iss: ${claims.iss}`);
-    context.log(`- sub: ${claims.sub}`);
-    context.log(`- scp: ${claims.scp}`);
-    context.log(`- exp: ${claims.exp}`);
-    context.log(`- iat: ${claims.iat}`);
-
-    // For CIAM tokens, validate against the frontend client ID (audience)
-    const expectedAudience = this.config.audience || this.config.clientId;
-    const expectedIssuer = `https://${this.config.tenantId}.ciamlogin.com/${this.config.tenantId}/v2.0`;
-    const requiredScope = 'Virpal.ReadWrite'; // CIAM scope for this API
-
-    context.log('Expected values:');
-    context.log(`- expected audience: ${expectedAudience}`);
-    context.log(`- expected issuer: ${expectedIssuer}`);
-    context.log(`- required scope: ${requiredScope}`);
-    context.log('=== END CLAIMS VALIDATION DEBUG ===');
-
+   */ private validateClaims(claims: B2CTokenClaims): TokenValidationResult {
     // Check required claims
     if (!claims.sub) {
       return {
@@ -318,15 +231,14 @@ class JWTValidationService {
       };
     }
 
+    // For CIAM tokens, validate against the frontend client ID (audience)
+    const expectedAudience = this.config.audience || this.config.clientId;
     if (
       !claims.aud ||
       (Array.isArray(claims.aud)
         ? !claims.aud.includes(expectedAudience)
         : claims.aud !== expectedAudience)
     ) {
-      context.warn(
-        `Token audience mismatch. Expected: ${expectedAudience}, Got: ${claims.aud}`
-      );
       return {
         isValid: false,
         error: 'Token audience mismatch',
@@ -340,7 +252,9 @@ class JWTValidationService {
         isValid: false,
         error: 'Token has expired',
       };
-    } // Check not before (nbf) claim
+    }
+
+    // Check not before (nbf) claim
     if (claims.nbf && claims.nbf > now) {
       return {
         isValid: false,
@@ -349,10 +263,8 @@ class JWTValidationService {
     }
 
     // Validate issuer format (updated for CIAM)
+    const expectedIssuer = `https://${this.config.tenantId}.ciamlogin.com/${this.config.tenantId}/v2.0`;
     if (claims.iss !== expectedIssuer) {
-      context.warn(
-        `Invalid token issuer: ${claims.iss}, expected: ${expectedIssuer}`
-      );
       return {
         isValid: false,
         error: 'Invalid token issuer',
@@ -360,10 +272,8 @@ class JWTValidationService {
     }
 
     // For CIAM: Validate that token contains required scope for API access
+    const requiredScope = 'Virpal.ReadWrite'; // CIAM scope for this API
     if (!this.hasScope(claims, requiredScope)) {
-      context.warn(
-        `Token missing required scope: ${requiredScope}. Available: ${claims.scp}`
-      );
       return {
         isValid: false,
         error: `Missing required permission: ${requiredScope}`,

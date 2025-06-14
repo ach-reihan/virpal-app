@@ -171,14 +171,9 @@ async function validateAuthentication(
         isAuthenticated: false,
         error: 'Token cannot be empty',
       };
-    }
-
-    // Validate JWT token
+    } // Validate JWT token
     const jwtValidationService = getJWTService();
-    const validationResult = await jwtValidationService.validateToken(
-      token,
-      context
-    );
+    const validationResult = await jwtValidationService.validateToken(token);
 
     if (!validationResult.isValid) {
       return {

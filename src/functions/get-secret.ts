@@ -184,14 +184,9 @@ async function validateAuthentication(
     } catch (decodeError) {
       context.warn('Could not decode token for debugging:', decodeError);
     }
-    context.log('=== END TOKEN DEBUG ===');
-
-    // Validate JWT token
+    context.log('=== END TOKEN DEBUG ==='); // Validate JWT token
     const jwtValidationService = getJWTService();
-    const validationResult = await jwtValidationService.validateToken(
-      token,
-      context
-    );
+    const validationResult = await jwtValidationService.validateToken(token);
 
     if (!validationResult.isValid) {
       return {
