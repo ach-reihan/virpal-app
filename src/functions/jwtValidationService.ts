@@ -224,13 +224,33 @@ class JWTValidationService {
       };
     }
   }
-
   /**
    * Validate token claims
    */ private validateClaims(
     claims: B2CTokenClaims,
     context: InvocationContext
   ): TokenValidationResult {
+    // Debug: Log claims validation
+    context.log('=== JWT CLAIMS VALIDATION DEBUG ===');
+    context.log('Received claims:');
+    context.log(`- aud: ${JSON.stringify(claims.aud)}`);
+    context.log(`- iss: ${claims.iss}`);
+    context.log(`- sub: ${claims.sub}`);
+    context.log(`- scp: ${claims.scp}`);
+    context.log(`- exp: ${claims.exp}`);
+    context.log(`- iat: ${claims.iat}`);
+
+    // For CIAM tokens, validate against the frontend client ID (audience)
+    const expectedAudience = this.config.audience || this.config.clientId;
+    const expectedIssuer = `https://${this.config.tenantId}.ciamlogin.com/${this.config.tenantId}/v2.0`;
+    const requiredScope = 'Virpal.ReadWrite'; // CIAM scope for this API
+
+    context.log('Expected values:');
+    context.log(`- expected audience: ${expectedAudience}`);
+    context.log(`- expected issuer: ${expectedIssuer}`);
+    context.log(`- required scope: ${requiredScope}`);
+    context.log('=== END CLAIMS VALIDATION DEBUG ===');
+
     // Check required claims
     if (!claims.sub) {
       return {
@@ -239,8 +259,6 @@ class JWTValidationService {
       };
     }
 
-    // For CIAM tokens, validate against the frontend client ID (audience)
-    const expectedAudience = this.config.audience || this.config.clientId;
     if (
       !claims.aud ||
       (Array.isArray(claims.aud)
@@ -263,16 +281,15 @@ class JWTValidationService {
         isValid: false,
         error: 'Token has expired',
       };
-    }
-
-    // Check not before (nbf) claim
+    } // Check not before (nbf) claim
     if (claims.nbf && claims.nbf > now) {
       return {
         isValid: false,
         error: 'Token not yet valid',
       };
-    } // Validate issuer format (updated for CIAM)
-    const expectedIssuer = `https://${this.config.tenantId}.ciamlogin.com/${this.config.tenantId}/v2.0`;
+    }
+
+    // Validate issuer format (updated for CIAM)
     if (claims.iss !== expectedIssuer) {
       context.warn(
         `Invalid token issuer: ${claims.iss}, expected: ${expectedIssuer}`
@@ -284,7 +301,6 @@ class JWTValidationService {
     }
 
     // For CIAM: Validate that token contains required scope for API access
-    const requiredScope = 'Virpal.ReadWrite'; // CIAM scope for this API
     if (!this.hasScope(claims, requiredScope)) {
       context.warn(
         `Token missing required scope: ${requiredScope}. Available: ${claims.scp}`

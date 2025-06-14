@@ -123,7 +123,20 @@ async function validateAuthentication(
     // Extract Authorization header
     const authHeader = request.headers.get('authorization');
 
+    // Debug: Log all request headers to see what we receive
+    context.log('=== REQUEST HEADERS DEBUG ===');
+    const headerEntries = Array.from(request.headers.entries());
+    headerEntries.forEach(([key, value]) => {
+      const logValue =
+        key.toLowerCase() === 'authorization'
+          ? value.substring(0, 20) + '...' // Only log first 20 chars of auth header
+          : value;
+      context.log(`${key}: ${logValue}`);
+    });
+    context.log('=== END HEADERS DEBUG ===');
+
     if (!authHeader) {
+      context.warn('No Authorization header found in request');
       return {
         isAuthenticated: false,
         error: 'Authorization header is required',
@@ -138,7 +151,6 @@ async function validateAuthentication(
         error: 'Invalid authorization header format. Expected: Bearer <token>',
       };
     }
-
     const token = tokenMatch[1];
     if (!token || token.trim() === '') {
       return {
@@ -146,6 +158,33 @@ async function validateAuthentication(
         error: 'Token cannot be empty',
       };
     }
+
+    // Debug: Log token info (without exposing the actual token)
+    context.log('=== TOKEN DEBUG ===');
+    context.log(`Token length: ${token.length}`);
+    context.log(`Token starts with: ${token.substring(0, 20)}...`);
+    // Try to decode token payload for debugging (without validation)
+    try {
+      const tokenParts = token.split('.');
+      if (tokenParts.length === 3 && tokenParts[1]) {
+        const payload = JSON.parse(
+          Buffer.from(tokenParts[1], 'base64').toString()
+        );
+        context.log('Token payload (debug):');
+        context.log(`- aud: ${payload.aud}`);
+        context.log(`- iss: ${payload.iss}`);
+        context.log(`- sub: ${payload.sub}`);
+        context.log(`- scp: ${payload.scp}`);
+        context.log(
+          `- exp: ${payload.exp} (${new Date(
+            payload.exp * 1000
+          ).toISOString()})`
+        );
+      }
+    } catch (decodeError) {
+      context.warn('Could not decode token for debugging:', decodeError);
+    }
+    context.log('=== END TOKEN DEBUG ===');
 
     // Validate JWT token
     const jwtValidationService = getJWTService();
