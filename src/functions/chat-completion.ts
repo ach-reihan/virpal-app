@@ -61,6 +61,13 @@ interface AzureOpenAIResponse {
   }>;
 }
 
+interface UserInfo {
+  userId: string;
+  email?: string | undefined;
+  name?: string | undefined;
+  scopes: string[];
+}
+
 interface ChatCompletionRequest {
   userInput: string;
   systemPrompt?: string;
@@ -124,7 +131,7 @@ function validateRequest(requestData: ChatCompletionRequest): {
 async function validateAuthentication(
   request: HttpRequest,
   context: InvocationContext
-): Promise<{ isAuthenticated: boolean; user?: any; error?: string }> {
+): Promise<{ isAuthenticated: boolean; user?: UserInfo; error?: string }> {
   try {
     // Check if we're in development mode
     const isDevMode = process.env['NODE_ENV'] === 'development';
@@ -320,7 +327,7 @@ const getCorsHeaders = (origin?: string | null) => {
   ];
 
   // Check if origin is allowed
-  let allowOrigin = 'http://localhost:5173'; // default fallback
+  let allowOrigin = 'https://ashy-coast-0aeebe10f.6.azurestaticapps.net/'; // default fallback
   if (origin) {
     if (allowedOrigins.includes(origin)) {
       allowOrigin = origin;
@@ -364,6 +371,25 @@ export async function chatCompletionHandler(
 
   context.info(`Chat completion request: ${request.method} ${requestId}`);
 
+  // Enhanced debug logging for troubleshooting
+  context.info('=== CHAT COMPLETION DEBUG INFO ===');
+  context.info(`Request URL: ${request.url}`);
+  context.info(`Request Method: ${request.method}`);
+  context.info(`Origin: ${origin || 'none'}`);
+  context.info(`User-Agent: ${request.headers.get('user-agent') || 'none'}`);
+  context.info(
+    `Content-Type: ${request.headers.get('content-type') || 'none'}`
+  );
+  context.info(
+    `Authorization: ${
+      request.headers.get('authorization') ? 'present' : 'none'
+    }`
+  );
+  context.info(
+    `X-Guest-Mode: ${request.headers.get('X-Guest-Mode') || 'none'}`
+  );
+  context.info('===================================');
+
   // Handle CORS preflight requests
   if (request.method === 'OPTIONS') {
     return {
@@ -385,12 +411,11 @@ export async function chatCompletionHandler(
     };
   } // Check if this is a guest mode request
   const isGuestMode = request.headers.get('X-Guest-Mode') === 'true';
-  let userInfo: any = null;
-
+  let userInfo: UserInfo | null = null;
   if (isGuestMode) {
     userInfo = {
       userId: 'guest',
-      email: null,
+      email: undefined,
       name: 'Guest User',
       scopes: ['guest'],
     };
@@ -409,7 +434,7 @@ export async function chatCompletionHandler(
       };
     }
 
-    userInfo = authResult.user;
+    userInfo = authResult.user || null;
   }
 
   try {
@@ -417,7 +442,7 @@ export async function chatCompletionHandler(
     let requestData: ChatCompletionRequest;
     try {
       requestData = (await request.json()) as ChatCompletionRequest;
-    } catch (parseError) {
+    } catch {
       return {
         status: 400,
         headers: getCorsHeaders(origin),

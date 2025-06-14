@@ -348,7 +348,7 @@ export async function getSecret(
   ];
 
   const origin = request.headers.get('origin');
-  let allowOrigin = 'http://localhost:5173'; // default fallback
+  let allowOrigin = 'https://ashy-coast-0aeebe10f.6.azurestaticapps.net/'; // default fallback
 
   if (origin) {
     // Check exact matches first
@@ -369,7 +369,7 @@ export async function getSecret(
   }
 
   const headers = {
-    'Access-Control-Allow-Origin': allowOrigin || '*',
+    'Access-Control-Allow-Origin': allowOrigin,
     'Access-Control-Allow-Methods': 'GET, OPTIONS',
     'Access-Control-Allow-Headers':
       'Content-Type, Accept, Authorization, X-Requested-With',

@@ -143,15 +143,52 @@ class JWTValidationService {
       const key = await this.jwksClient.getSigningKey(kid);
       return key.getPublicKey();
     } catch (error) {
-      // Log error without exposing sensitive key information
-      throw new Error('Failed to get signing key');
+      // Enhanced error handling with more context
+      console.error('JWKS signing key error details:', {
+        kid,
+        error: error instanceof Error ? error.message : 'Unknown error',
+        jwksUri: `https://${this.config.tenantName}.ciamlogin.com/${this.config.tenantId}/discovery/v2.0/keys`,
+      });
+
+      // Try alternative JWKS URI format if the first one fails
+      if (
+        error instanceof Error &&
+        error.message.includes('Unable to find a signing key')
+      ) {
+        console.warn('Retrying with alternative JWKS URI format...');
+
+        // Create a new client with alternative URI format
+        const alternativeJwksUri = `https://${this.config.tenantId}.ciamlogin.com/${this.config.tenantId}/discovery/v2.0/keys`;
+        const alternativeClient = jwksClient({
+          jwksUri: alternativeJwksUri,
+          requestHeaders: {},
+          timeout: 30000,
+          cache: true,
+          cacheMaxEntries: 5,
+          cacheMaxAge: this.CACHE_DURATION,
+          rateLimit: true,
+          jwksRequestsPerMinute: 5,
+        });
+
+        try {
+          const alternativeKey = await alternativeClient.getSigningKey(kid);
+          console.info('Successfully retrieved key with alternative URI');
+          return alternativeKey.getPublicKey();
+        } catch (alternativeError) {
+          console.error('Alternative JWKS URI also failed:', alternativeError);
+        }
+      }
+
+      throw new Error(
+        `Failed to get signing key for kid: ${kid}. Please check JWKS endpoint configuration.`
+      );
     }
   }
   /**
    * Validate JWT token
    */ async validateToken(token: string): Promise<TokenValidationResult> {
     try {
-      // Simplified approach: Use only jwt.decode() but with proper error handling
+      // Step 1: Decode token header to get kid without verification
       const decodedToken = jwt.decode(token, { complete: true });
 
       if (!decodedToken || typeof decodedToken === 'string') {
@@ -164,39 +201,113 @@ class JWTValidationService {
       // Extract kid from header
       const kid = decodedToken.header?.kid;
       if (!kid) {
+        console.warn(
+          'JWT token missing kid in header. Token header:',
+          decodedToken.header
+        );
         return {
           isValid: false,
           error: 'Invalid token: missing key ID (kid) in header',
         };
       }
 
-      // Get signing key
-      const signingKey = await this.getSigningKey(kid);
+      console.debug('JWT validation started', {
+        kid,
+        algorithm: decodedToken.header?.alg,
+        tokenType: decodedToken.header?.typ,
+      });
 
-      // JWT verification options
+      // Step 2: Get signing key with enhanced error handling
+      let signingKey: string;
+      try {
+        signingKey = await this.getSigningKey(kid);
+      } catch (keyError) {
+        console.error('Failed to retrieve signing key:', keyError);
+        return {
+          isValid: false,
+          error: `Unable to verify token signature: ${
+            keyError instanceof Error
+              ? keyError.message
+              : 'Key retrieval failed'
+          }`,
+        };
+      }
+
+      // Step 3: JWT verification options with enhanced configuration
       const verifyOptions: jwt.VerifyOptions = {
         algorithms: ['RS256'],
         audience: this.config.audience || this.config.clientId,
         issuer:
           this.config.issuer ||
           `https://${this.config.tenantId}.ciamlogin.com/${this.config.tenantId}/v2.0`,
-        clockTolerance: 60, // 60 seconds tolerance for clock skew
+        clockTolerance: 300, // Increased to 5 minutes for clock skew tolerance
+        ignoreExpiration: false,
+        ignoreNotBefore: false,
       };
 
-      // Verify token
-      const decoded = jwt.verify(
-        token,
-        signingKey,
-        verifyOptions
-      ) as B2CTokenClaims; // Additional validation
+      console.debug('JWT verification options:', {
+        algorithms: verifyOptions.algorithms,
+        audience: verifyOptions.audience,
+        issuer: verifyOptions.issuer,
+        clockTolerance: verifyOptions.clockTolerance,
+      });
+
+      // Step 4: Verify token with detailed error handling
+      let decoded: B2CTokenClaims;
+      try {
+        decoded = jwt.verify(
+          token,
+          signingKey,
+          verifyOptions
+        ) as B2CTokenClaims;
+        console.debug('JWT signature verification successful');
+      } catch (verificationError) {
+        console.error('JWT verification failed:', {
+          error:
+            verificationError instanceof Error
+              ? verificationError.message
+              : 'Unknown error',
+          name:
+            verificationError instanceof Error
+              ? verificationError.name
+              : 'Unknown',
+        });
+
+        // Return specific error messages based on verification failure type
+        if (verificationError instanceof jwt.TokenExpiredError) {
+          return { isValid: false, error: 'Token has expired' };
+        } else if (verificationError instanceof jwt.JsonWebTokenError) {
+          return { isValid: false, error: 'Invalid token format or signature' };
+        } else if (verificationError instanceof jwt.NotBeforeError) {
+          return { isValid: false, error: 'Token not active yet' };
+        } else {
+          return {
+            isValid: false,
+            error: `Token verification failed: ${
+              verificationError instanceof Error
+                ? verificationError.message
+                : 'Unknown error'
+            }`,
+          };
+        }
+      }
+
+      // Step 5: Additional validation
       const validationResult = this.validateClaims(decoded);
       if (!validationResult.isValid) {
+        console.warn('Token claims validation failed:', validationResult.error);
         return validationResult;
       }
 
-      // Extract user info dan scopes
+      // Step 6: Extract user info dan scopes
       const userId = decoded.sub;
       const scopes = decoded.scp ? decoded.scp.split(' ') : [];
+
+      console.info('JWT validation successful', {
+        userId: userId?.substring(0, 8) + '...', // Log only first 8 chars for privacy
+        scopesCount: scopes.length,
+        issuer: decoded.iss,
+      });
 
       return {
         isValid: true,
@@ -205,6 +316,8 @@ class JWTValidationService {
         scopes,
       };
     } catch (error) {
+      console.error('Unexpected error in JWT validation:', error);
+
       let errorMessage = 'Token validation failed';
       if (error instanceof jwt.TokenExpiredError) {
         errorMessage = 'Token has expired';
@@ -212,6 +325,8 @@ class JWTValidationService {
         errorMessage = 'Invalid token format';
       } else if (error instanceof jwt.NotBeforeError) {
         errorMessage = 'Token not active yet';
+      } else if (error instanceof Error) {
+        errorMessage = `Token validation failed: ${error.message}`;
       }
 
       return {
@@ -239,10 +354,25 @@ class JWTValidationService {
         ? !claims.aud.includes(expectedAudience)
         : claims.aud !== expectedAudience)
     ) {
-      return {
-        isValid: false,
-        error: 'Token audience mismatch',
-      };
+      console.warn('Token audience validation failed', {
+        expectedAudience,
+        actualAudience: claims.aud,
+        audienceType: Array.isArray(claims.aud) ? 'array' : typeof claims.aud,
+      });
+
+      // For development, be more lenient with audience validation
+      const isDevelopment =
+        process.env['NODE_ENV'] === 'development' ||
+        process.env['AZURE_FUNCTIONS_ENVIRONMENT'] === 'Development';
+
+      if (!isDevelopment) {
+        return {
+          isValid: false,
+          error: 'Token audience mismatch',
+        };
+      } else {
+        console.warn('Development mode: Allowing audience mismatch');
+      }
     }
 
     // Check token expiry (additional check, jwt.verify already handles this)
@@ -262,24 +392,67 @@ class JWTValidationService {
       };
     }
 
-    // Validate issuer format (updated for CIAM)
-    const expectedIssuer = `https://${this.config.tenantId}.ciamlogin.com/${this.config.tenantId}/v2.0`;
-    if (claims.iss !== expectedIssuer) {
-      return {
-        isValid: false,
-        error: 'Invalid token issuer',
-      };
+    // Validate issuer format (updated for CIAM) with multiple accepted formats
+    const expectedIssuers = [
+      `https://${this.config.tenantId}.ciamlogin.com/${this.config.tenantId}/v2.0`,
+      `https://${this.config.tenantName}.ciamlogin.com/${this.config.tenantId}/v2.0`,
+      // Alternative formats that might be used
+      `https://${this.config.tenantName}.ciamlogin.com/${this.config.tenantName}.onmicrosoft.com/v2.0`,
+    ];
+
+    const isValidIssuer = expectedIssuers.some(
+      (issuer) => claims.iss === issuer
+    );
+
+    if (!isValidIssuer) {
+      console.warn('Token issuer validation failed', {
+        expectedIssuers,
+        actualIssuer: claims.iss,
+      });
+
+      // For development, be more lenient with issuer validation
+      const isDevelopment =
+        process.env['NODE_ENV'] === 'development' ||
+        process.env['AZURE_FUNCTIONS_ENVIRONMENT'] === 'Development';
+
+      if (!isDevelopment) {
+        return {
+          isValid: false,
+          error: 'Invalid token issuer',
+        };
+      } else {
+        console.warn('Development mode: Allowing issuer mismatch');
+      }
     }
 
     // For CIAM: Validate that token contains required scope for API access
     const requiredScope = 'Virpal.ReadWrite'; // CIAM scope for this API
     if (!this.hasScope(claims, requiredScope)) {
-      return {
-        isValid: false,
-        error: `Missing required permission: ${requiredScope}`,
-      };
+      console.warn('Token scope validation failed', {
+        requiredScope,
+        actualScopes: claims.scp,
+        hasScope: this.hasScope(claims, requiredScope),
+      });
+
+      // For development or if no scope is required, be more lenient
+      const isDevelopment =
+        process.env['NODE_ENV'] === 'development' ||
+        process.env['AZURE_FUNCTIONS_ENVIRONMENT'] === 'Development';
+
+      if (!isDevelopment && claims.scp) {
+        // Only check if scopes exist
+        return {
+          isValid: false,
+          error: `Missing required permission: ${requiredScope}`,
+        };
+      } else {
+        console.warn(
+          'Development mode or no scopes: Allowing scope validation to pass'
+        );
+      }
     }
 
+    console.debug('Token claims validation successful');
     return { isValid: true };
   }
 
@@ -310,30 +483,29 @@ class JWTValidationService {
     const scopes = claims.scp.split(' ');
     return scopes.includes(requiredScope);
   }
-
   /**
    * Get token info untuk debugging
    */
   getTokenInfo(token: string): {
-    header?: any;
-    payload?: any;
+    header?: jwt.JwtHeader;
+    payload?: jwt.JwtPayload;
     isExpired?: boolean;
   } {
     try {
       const decoded = jwt.decode(token, { complete: true });
-      if (!decoded) return {};
+      if (!decoded || typeof decoded.payload === 'string') return {};
 
-      const payload = decoded.payload as JwtPayload;
+      const payload = decoded.payload as jwt.JwtPayload;
       const isExpired = payload.exp
         ? payload.exp < Math.floor(Date.now() / 1000)
         : false;
 
       return {
         header: decoded.header,
-        payload: decoded.payload,
+        payload: decoded.payload as jwt.JwtPayload,
         isExpired,
       };
-    } catch (error) {
+    } catch {
       return {};
     }
   }

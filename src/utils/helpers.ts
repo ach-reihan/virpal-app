@@ -28,8 +28,8 @@ export const getAvatarImageUrl = (expression: AvatarExpression): string => {
     ['sad', '/images/avatar-sad.png'],
     ['listening', '/images/avatar-listening.png'],
     ['neutral', '/images/avatar-neutral.png'],
-    ['surprised', '/images/avatar-surprised.png'],
-    ['confused', '/images/avatar-confused.png'],
+    ['surprised', '/images/avatar-neutral.png'], // Fallback ke neutral
+    ['confused', '/images/avatar-thinking.png'], // Fallback ke thinking
   ]);
 
   return (

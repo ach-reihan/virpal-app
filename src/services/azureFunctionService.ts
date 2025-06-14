@@ -104,8 +104,10 @@ async function getAuthHeaders(
         logger.debug('Successfully obtained access token for API request');
       }
     }
-  } catch (error) {
-    logger.warn('Failed to get access token for API request');
+  } catch (authError) {
+    logger.warn('Failed to get access token for API request', {
+      error: authError instanceof Error ? authError.message : 'Unknown error',
+    });
     // Continue without auth header - let the backend handle unauthorized requests
   }
 
@@ -220,12 +222,33 @@ export async function getAzureOpenAICompletion(
   try {
     const startTime = performance.now();
 
+    // Enhanced logging for debugging
+    logger.info('Initiating Azure Function request', {
+      endpoint: AZURE_FUNCTION_ENDPOINT,
+      isGuestMode,
+      userInputLength: userInput.length,
+      hasSystemPrompt: !!options.systemPrompt,
+      messageHistoryLength: limitedHistory?.length || 0,
+    });
+
     // Get authentication headers (with guest mode flag)
     const headers = await getAuthHeaders(isGuestMode);
 
+    // Log headers for debugging (without sensitive data)
+    logger.debug('Request headers prepared', {
+      hasAuthorization: !!headers['Authorization'],
+      isGuestMode: headers['X-Guest-Mode'] === 'true',
+      contentType: headers['Content-Type'],
+    });
+
     // Use retry logic for the request
     const response = await retryRequest(async () => {
-      return await fetchWithTimeout(
+      logger.debug('Making fetch request to Azure Function', {
+        url: AZURE_FUNCTION_ENDPOINT,
+        method: 'POST',
+      });
+
+      const fetchResponse = await fetchWithTimeout(
         AZURE_FUNCTION_ENDPOINT,
         {
           method: 'POST',
@@ -234,18 +257,36 @@ export async function getAzureOpenAICompletion(
         },
         REQUEST_TIMEOUT
       );
+
+      logger.debug('Received response from Azure Function', {
+        status: fetchResponse.status,
+        statusText: fetchResponse.statusText,
+        hasBody: !!fetchResponse.body,
+      });
+
+      return fetchResponse;
     });
 
     const endTime = performance.now();
     logger.debug(`Azure Function request completed`, {
       duration: `${endTime - startTime}ms`,
       isGuestMode,
+      status: response.status,
     });
-
     if (!response.ok) {
-      const errorData = await response
-        .json()
-        .catch(() => ({ error: 'Unknown error' }));
+      // Enhanced error handling for different status codes
+      let errorData: { error?: string; details?: string };
+      try {
+        errorData = await response.json();
+      } catch {
+        errorData = { error: 'Unknown error' };
+      }
+
+      logger.error('Azure Function API error', {
+        status: response.status,
+        statusText: response.statusText,
+        errorData,
+      });
 
       // For 401 errors in guest mode, try fallback approach
       if (response.status === 401 && isGuestMode) {
@@ -257,7 +298,25 @@ export async function getAzureOpenAICompletion(
         );
       }
 
-      logger.error('Azure Function API error', { status: response.status });
+      // Handle other specific status codes
+      if (response.status === 404) {
+        throw new Error(
+          'Layanan chat tidak tersedia saat ini. Coba lagi nanti.'
+        );
+      }
+
+      if (response.status === 429) {
+        throw new Error(
+          'Terlalu banyak permintaan. Tunggu sebentar dan coba lagi.'
+        );
+      }
+
+      if (response.status >= 500) {
+        throw new Error(
+          'Server sedang bermasalah. Coba lagi dalam beberapa menit.'
+        );
+      }
+
       throw new Error(
         `Azure Function API error: ${response.status} - ${
           errorData.error || 'Unknown error'
@@ -288,6 +347,7 @@ export async function getAzureOpenAICompletion(
   } catch (error) {
     logger.error('Failed to fetch completion from Azure Function', {
       isGuestMode,
+      error: error instanceof Error ? error.message : 'Unknown error',
     });
 
     // Return user-friendly error messages based on error type
@@ -304,7 +364,10 @@ export async function getAzureOpenAICompletion(
         return 'Maaf, responsnya agak lama nih. Koneksi internet kamu stabil? Coba lagi ya.';
       }
 
-      if (error.message.includes('fetch')) {
+      if (
+        error.message.includes('fetch') ||
+        error.message.includes('network')
+      ) {
         return 'Maaf, aku tidak bisa terhubung ke server saat ini. Pastikan koneksi internetmu stabil dan coba lagi.';
       }
 
@@ -317,6 +380,6 @@ export async function getAzureOpenAICompletion(
       }
     }
 
-    return 'Maaf, aku sedang mengalami sedikit kesulitan untuk merespons saat ini. Coba lagi nanti ya.';
+    return 'Ups, sepertinya ada sedikit gangguan di jaringanku. Bisa coba ulangi lagi?';
   }
 }

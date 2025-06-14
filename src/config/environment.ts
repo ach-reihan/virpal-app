@@ -63,17 +63,35 @@ export const getEnvironmentConfig = (): EnvironmentConfig => {
 export const getApiEndpoint = (functionName: string): string => {
   const config = getEnvironmentConfig();
 
+  // Enhanced debug logging
+  console.debug('Environment configuration:', {
+    isProduction: config.isProduction,
+    isAzureStaticWebApp: config.isAzureStaticWebApp,
+    isDevelopment: config.isDevelopment,
+    functionBaseUrl: config.functionBaseUrl,
+    apiEndpoint: config.apiEndpoint,
+    hostname:
+      typeof window !== 'undefined' ? window.location.hostname : 'server',
+  });
+
+  let endpoint: string;
+
   if (config.isAzureStaticWebApp && config.isProduction) {
     // Azure Static Web Apps - gunakan relative path
-    return `/api/${functionName}`;
+    endpoint = `/api/${functionName}`;
   } else if (config.isProduction) {
     // Production di platform lain - fallback ke relative jika tidak ada env var
     const baseUrl = config.functionBaseUrl || '';
-    return baseUrl ? `${baseUrl}/api/${functionName}` : `/api/${functionName}`;
+    endpoint = baseUrl
+      ? `${baseUrl}/api/${functionName}`
+      : `/api/${functionName}`;
   } else {
     // Development - gunakan localhost
-    return `${config.apiEndpoint}/${functionName}`;
+    endpoint = `${config.apiEndpoint}/${functionName}`;
   }
+
+  console.debug(`API endpoint for ${functionName}:`, endpoint);
+  return endpoint;
 };
 
 /**
