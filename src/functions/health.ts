@@ -11,8 +11,7 @@
  * in any form or by any means, including photocopying, recording, or other
  * electronic or mechanical methods, without the prior written permission
  * of the copyright holder, except in the case of brief quotations embodied
- * in critical reviews and certain other noncommercial uses permitted by
- * copyright law.
+ * in critical reviews and certain other noncommercial uses permitted by * copyright law.
  *
  * For licensing inquiries: reihan3000@gmail.com
  */
@@ -22,8 +21,7 @@ import type {
   HttpResponseInit,
   InvocationContext,
 } from '@azure/functions';
-import pkg from '@azure/functions';
-const { app } = pkg;
+import { app } from '@azure/functions';
 
 /**
  * Health check endpoint for monitoring and CI/CD pipeline verification
@@ -328,7 +326,7 @@ async function checkService(
 // Register the function with enhanced configuration
 app.http('health', {
   methods: ['GET', 'HEAD'],
-  authLevel: 'anonymous',
+  authLevel: 'function', // Function level security for production
   route: 'health',
   handler: health,
 });

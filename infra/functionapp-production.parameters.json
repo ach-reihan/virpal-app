@@ -1,0 +1,42 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "functionAppName": {
+      "value": "virpal-production-func"
+    },
+    "location": {
+      "value": "Southeast Asia"
+    },
+    "functionAppSku": {
+      "value": "Y1"
+    },
+    "storageAccountName": {
+      "value": "virpalprodstorage"
+    },
+    "applicationInsightsInstrumentationKey": {
+      "value": "${APPINSIGHTS_INSTRUMENTATIONKEY}"
+    },
+    "managedIdentityPrincipalId": {
+      "value": "${AZURE_CLIENT_ID}"
+    },
+    "userAssignedIdentityId": {
+      "value": "${USER_ASSIGNED_IDENTITY_ID}"
+    },
+    "keyVaultUrl": {
+      "value": "${KEY_VAULT_URL}"
+    },
+    "environmentName": {
+      "value": "${AZURE_ENV_NAME}"
+    },
+    "tags": {
+      "value": {
+        "project": "virpal-app",
+        "environment": "production",
+        "purpose": "ai-assistant",
+        "costCenter": "engineering",
+        "deploymentTool": "azd"
+      }
+    }
+  }
+}

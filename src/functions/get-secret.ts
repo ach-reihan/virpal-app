@@ -37,11 +37,10 @@ import type {
   HttpResponseInit,
   InvocationContext,
 } from '@azure/functions';
-import pkg from '@azure/functions';
+import { app } from '@azure/functions';
 import { DefaultAzureCredential } from '@azure/identity';
 import { SecretClient } from '@azure/keyvault-secrets';
 import { createJWTService } from './jwtValidationService.js';
-const { app } = pkg;
 
 interface KeyVaultResponse {
   success: boolean;
@@ -571,6 +570,6 @@ export async function getSecret(
 // Register the function
 app.http('get-secret', {
   methods: ['GET', 'OPTIONS'],
-  authLevel: 'anonymous', // Change to 'function' or 'admin' for production
+  authLevel: 'function', // Function level security for production
   handler: getSecret,
 });

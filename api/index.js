@@ -11,17 +11,15 @@
  * in any form or by any means, including photocopying, recording, or other
  * electronic or mechanical methods, without the prior written permission
  * of the copyright holder, except in the case of brief quotations embodied
- * in critical reviews and certain other noncommercial uses permitted by
- * copyright law.
+ * in critical reviews and certain other noncommercial uses permitted by * copyright law.
  *
  * For licensing inquiries: reihan3000@gmail.com
  */
-import pkg from '@azure/functions';
-const { app } = pkg;
+import { app } from '@azure/functions';
 // Import functions to register them with the Azure Functions runtime
-import './functions/chat-completion.mjs';
-import './functions/get-secret.mjs';
-import './functions/health.mjs';
+import './functions/chat-completion.js';
+import './functions/get-secret.js';
+import './functions/health.js';
 app.setup({
     enableHttpStream: true,
 });

@@ -17,8 +17,8 @@
  * For licensing inquiries: reihan3000@gmail.com
  */
 import { app } from '@azure/functions';
-import { keyVaultService } from '../services/azureKeyVaultService.mjs';
-import { createJWTService } from './jwtValidationService.mjs';
+import { keyVaultService } from '../services/azureKeyVaultService.js';
+import { createJWTService } from './jwtValidationService.js';
 // Performance optimization: Cache configuration to avoid repeated Key Vault calls
 let configCache = null;
 const CONFIG_CACHE_DURATION = 5 * 60 * 1000; // 5 minutes cache
