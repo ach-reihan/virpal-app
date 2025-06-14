@@ -159,12 +159,34 @@ class JWTValidationService {
       context.log('=== JWT TOKEN VALIDATION START ===');
       context.log(`Token length: ${token?.length || 0}`);
 
+      // Manual decode header untuk debugging
+      try {
+        const tokenParts = token.split('.');
+        if (tokenParts.length === 3 && tokenParts[0]) {
+          const headerBuffer = Buffer.from(tokenParts[0], 'base64');
+          const headerJson = headerBuffer.toString('utf8');
+          const headerObj = JSON.parse(headerJson);
+          context.log('Manual decoded header:', JSON.stringify(headerObj));
+          context.log(`Manual decoded kid: ${headerObj.kid}`);
+        }
+      } catch (manualDecodeError) {
+        context.error('Manual header decode failed:', manualDecodeError);
+      }
+
       // Decode token header untuk mendapatkan kid
       const decodedHeader = jwt.decode(token, { complete: true });
 
       context.log(
-        'Decoded token header:',
+        'JWT library decoded header:',
         JSON.stringify(decodedHeader?.header || {})
+      );
+      context.log(
+        'JWT library decoded payload preview:',
+        JSON.stringify({
+          aud: (decodedHeader?.payload as JwtPayload)?.aud,
+          iss: (decodedHeader?.payload as JwtPayload)?.iss,
+          kid_from_header: decodedHeader?.header?.kid,
+        })
       );
 
       if (!decodedHeader) {
