@@ -196,18 +196,47 @@ class JWTValidationService {
           isValid: false,
           error: 'Invalid JWT format - failed to decode token',
         };
+      } // Extract kid from header with enhanced validation
+      const header = decodedToken.header;
+      console.debug('JWT token header analysis:', {
+        headerExists: !!header,
+        headerType: typeof header,
+        headerKeys: header ? Object.keys(header) : [],
+        alg: header?.alg,
+        typ: header?.typ,
+        kid: header?.kid,
+        hasKid: !!header?.kid,
+        kidType: typeof header?.kid,
+        kidLength: header?.kid ? header.kid.length : 0,
+      });
+
+      // Validate header structure first
+      if (!header) {
+        return {
+          isValid: false,
+          error: 'Invalid token: missing header section',
+        };
       }
 
-      // Extract kid from header
-      const kid = decodedToken.header?.kid;
-      if (!kid) {
+      // Check for required header fields
+      if (!header.alg) {
+        return {
+          isValid: false,
+          error: 'Invalid token: missing algorithm (alg) in header',
+        };
+      }
+
+      // Extract and validate kid
+      const kid = header.kid;
+      if (!kid || typeof kid !== 'string' || kid.trim() === '') {
         console.warn(
-          'JWT token missing kid in header. Token header:',
-          decodedToken.header
+          'JWT token missing or invalid kid in header. Full header:',
+          header
         );
         return {
           isValid: false,
-          error: 'Invalid token: missing key ID (kid) in header',
+          error:
+            'Invalid token: missing or invalid key ID (kid) in header. Token may be malformed or from wrong issuer.',
         };
       }
 

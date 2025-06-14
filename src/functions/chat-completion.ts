@@ -607,4 +607,5 @@ app.http('chat-completion', {
   methods: ['POST', 'OPTIONS'],
   authLevel: 'anonymous', // Anonymous access for Azure SWA compatibility
   handler: chatCompletionHandler,
+  route: 'chat-completion', // Explicitly specify route for Azure Static Web Apps
 });

@@ -8,7 +8,10 @@
       }
     },
     "logLevel": {
-      "default": "Information"
+      "default": "Information",
+      "Host.Results": "Information",
+      "Function": "Information",
+      "Host.Aggregator": "Information"
     }
   },
   "extensionBundle": {
@@ -16,6 +19,13 @@
     "version": "[4.*, 6.0.0)"
   },
   "functionTimeout": "00:05:00",
+  "healthMonitor": {
+    "enabled": true,
+    "healthCheckInterval": "00:00:10",
+    "healthCheckWindow": "00:02:00",
+    "healthCheckThreshold": 6,
+    "counterThreshold": 0.8
+  },
   "cors": {
     "allowedOrigins": [
       "http://localhost:5173",
@@ -23,21 +33,21 @@
       "https://localhost:5173",
       "http://localhost:3000",
       "http://127.0.0.1:3000",
-      "https://ashy-coast-0aeebe10f.6.azurestaticapps.net",
-      "*"
+      "https://ashy-coast-0aeebe10f.6.azurestaticapps.net"
     ],
-    "allowedMethods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    "allowedMethods": [
+      "GET",
+      "POST",
+      "PUT",
+      "DELETE",
+      "OPTIONS"
+    ],
     "allowedHeaders": [
       "Content-Type",
       "Authorization",
-      "Accept",
-      "X-Requested-With",
-      "X-Guest-Mode"
+      "Accept"
     ],
     "maxAge": 86400,
     "supportCredentials": true
-  },
-  "http": {
-    "routePrefix": "api"
   }
 }
