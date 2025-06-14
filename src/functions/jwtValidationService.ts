@@ -78,7 +78,7 @@ export interface B2CTokenClaims extends JwtPayload {
   /** User family name */
   family_name?: string;
   /** Additional custom claims */
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 /**
@@ -148,7 +148,6 @@ class JWTValidationService {
       throw new Error('Failed to get signing key');
     }
   }
-
   /**
    * Validate JWT token
    */ async validateToken(
@@ -156,9 +155,39 @@ class JWTValidationService {
     context: InvocationContext
   ): Promise<TokenValidationResult> {
     try {
+      // Debug: Log token validation start
+      context.log('=== JWT TOKEN VALIDATION START ===');
+      context.log(`Token length: ${token?.length || 0}`);
+
       // Decode token header untuk mendapatkan kid
       const decodedHeader = jwt.decode(token, { complete: true });
-      if (!decodedHeader || !decodedHeader.header.kid) {
+
+      context.log(
+        'Decoded token header:',
+        JSON.stringify(decodedHeader?.header || {})
+      );
+
+      if (!decodedHeader) {
+        context.error('Failed to decode JWT token');
+        return {
+          isValid: false,
+          error: 'Invalid token: failed to decode',
+        };
+      }
+
+      if (!decodedHeader.header) {
+        context.error('JWT token missing header');
+        return {
+          isValid: false,
+          error: 'Invalid token: missing header',
+        };
+      }
+
+      if (!decodedHeader.header.kid) {
+        context.error(
+          'JWT header missing kid:',
+          JSON.stringify(decodedHeader.header)
+        );
         return {
           isValid: false,
           error: 'Invalid token: missing key ID (kid) in header',
@@ -166,8 +195,10 @@ class JWTValidationService {
       }
 
       const kid = decodedHeader.header.kid;
+      context.log(`Found kid in token header: ${kid}`);
 
       // Get signing key
+      context.log('Getting signing key for kid:', kid);
       const signingKey = await this.getSigningKey(kid);
       // JWT verification options
       const verifyOptions: jwt.VerifyOptions = {
