@@ -32,18 +32,35 @@ function ensureDirectoriesExist() {
 // === ES MODULE CONFIGURATION ===
 function setupESModules() {
   const packageJsonPath = path.join(__dirname, '..', 'dist', 'package.json');
+  // Production-ready Azure Functions package.json for Azure SWA
   const esmPackage = {
     name: 'virpal-app-functions',
     version: '1.0.0',
-    description: 'Azure Functions for VirPal App',
+    description:
+      'Azure Functions for VirPal App - Node.js 20 & Functions v4 Production Azure SWA',
     type: 'module',
     main: 'index.mjs',
     engines: {
-      node: '>=18',
+      node: '~20',
+    },
+    scripts: {
+      start: 'func start --cors "*"',
+      build: 'echo "Production build for Azure SWA"',
+      test: 'echo "Error: no test specified" && exit 1',
     },
     dependencies: {
-      '@azure/functions': '^4.0.0',
+      '@azure/functions': '^4.7.2',
+      '@azure/identity': '^4.10.0',
+      '@azure/keyvault-secrets': '^4.9.0',
+      jsonwebtoken: '^9.0.2',
+      'jwks-rsa': '^3.1.0',
     },
+    devDependencies: {
+      '@types/node': '^20.0.0',
+      'azure-functions-core-tools': '^4.0.7317',
+    },
+    optionalDependencies: {},
+    peerDependencies: {},
   };
 
   if (
@@ -52,7 +69,9 @@ function setupESModules() {
       JSON.stringify(esmPackage)
   ) {
     fs.writeFileSync(packageJsonPath, JSON.stringify(esmPackage, null, 2));
-    changes.push('Updated dist/package.json with ES module config');
+    changes.push(
+      'Updated dist/package.json with ES module config for production'
+    );
   }
 }
 
@@ -340,9 +359,7 @@ function fixImportsInMJSFile(filePath, distDir) {
 function setupCORS() {
   const hostJsonPath = path.join(__dirname, '..', 'host.json');
   if (fs.existsSync(hostJsonPath)) {
-    let hostJson = JSON.parse(fs.readFileSync(hostJsonPath, 'utf8'));
-
-    // Add CORS if not present
+    let hostJson = JSON.parse(fs.readFileSync(hostJsonPath, 'utf8')); // Add CORS if not present
     if (!hostJson.cors) {
       hostJson.cors = {
         allowedOrigins: [
@@ -351,10 +368,12 @@ function setupCORS() {
           'https://localhost:5173',
           'http://localhost:3000',
           'http://127.0.0.1:3000',
+          'https://ashy-coast-0aeebe10f.6.azurestaticapps.net',
         ],
         allowedMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
         allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
         maxAge: 86400,
+        supportCredentials: true,
       };
 
       fs.writeFileSync(hostJsonPath, JSON.stringify(hostJson, null, 2));
@@ -377,18 +396,36 @@ function copyHostJson() {
 // === UPDATE API PACKAGE.JSON ===
 function updateApiPackageJson() {
   const apiPackageJsonPath = path.join(__dirname, '..', 'api', 'package.json');
+
+  // Production-ready Azure Functions package.json for Azure SWA
   const apiPackage = {
     name: 'virpal-app-functions',
     version: '1.0.0',
-    description: 'Azure Functions for VirPal App',
+    description:
+      'Azure Functions for VirPal App - Node.js 20 & Functions v4 Production Azure SWA',
     type: 'module',
     main: 'index.mjs',
     engines: {
-      node: '>=18',
+      node: '~20',
+    },
+    scripts: {
+      start: 'func start --cors "*"',
+      build: 'echo "Production build for Azure SWA"',
+      test: 'echo "Error: no test specified" && exit 1',
     },
     dependencies: {
-      '@azure/functions': '^4.0.0',
+      '@azure/functions': '^4.7.2',
+      '@azure/identity': '^4.10.0',
+      '@azure/keyvault-secrets': '^4.9.0',
+      jsonwebtoken: '^9.0.2',
+      'jwks-rsa': '^3.1.0',
     },
+    devDependencies: {
+      '@types/node': '^20.0.0',
+      'azure-functions-core-tools': '^4.0.7317',
+    },
+    optionalDependencies: {},
+    peerDependencies: {},
   };
 
   const apiDir = path.join(__dirname, '..', 'api');
@@ -402,7 +439,53 @@ function updateApiPackageJson() {
       JSON.stringify(apiPackage)
   ) {
     fs.writeFileSync(apiPackageJsonPath, JSON.stringify(apiPackage, null, 2));
-    changes.push('Updated api/package.json with full function configuration');
+    changes.push(
+      'Updated api/package.json with production Azure Functions v4 configuration'
+    );
+  }
+}
+
+// === VALIDATION FOR PRODUCTION (Azure handles installation) ===
+function validateProductionDependencies() {
+  const apiPackagePath = path.join(__dirname, '..', 'api', 'package.json');
+
+  console.log('📦 Validating production dependencies in api folder...');
+
+  try {
+    if (fs.existsSync(apiPackagePath)) {
+      const packageContent = JSON.parse(
+        fs.readFileSync(apiPackagePath, 'utf8')
+      );
+      const requiredDeps = [
+        '@azure/functions',
+        '@azure/identity',
+        '@azure/keyvault-secrets',
+      ];
+
+      const missingDeps = requiredDeps.filter(
+        (dep) => !packageContent.dependencies[dep]
+      );
+
+      if (missingDeps.length === 0) {
+        changes.push(
+          'All required dependencies are present in api/package.json'
+        );
+        console.log(
+          '✅ All required dependencies validated - Azure will install automatically'
+        );
+      } else {
+        console.warn('⚠️ Missing dependencies:', missingDeps.join(', '));
+        changes.push(
+          'Warning: Missing dependencies: ' + missingDeps.join(', ')
+        );
+      }
+    } else {
+      console.error('❌ api/package.json not found');
+      changes.push('Error: api/package.json not found');
+    }
+  } catch (error) {
+    console.error('❌ Failed to validate dependencies:', error.message);
+    changes.push('Failed to validate dependencies: ' + error.message);
   }
 }
 
@@ -419,6 +502,7 @@ fixImportSyntax();
 setupCORS();
 copyHostJson();
 updateApiPackageJson();
+validateProductionDependencies();
 
 if (changes.length > 0) {
   console.log('✅ The following changes were made:');

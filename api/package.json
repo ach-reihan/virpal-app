@@ -1,13 +1,28 @@
 {
   "name": "virpal-app-functions",
   "version": "1.0.0",
-  "description": "Azure Functions for VirPal App",
+  "description": "Azure Functions for VirPal App - Node.js 20 & Functions v4 Production Azure SWA",
   "type": "module",
   "main": "index.mjs",
   "engines": {
-    "node": ">=18"
+    "node": "~20"
+  },
+  "scripts": {
+    "start": "func start --cors \"*\"",
+    "build": "echo \"Production build for Azure SWA\"",
+    "test": "echo \"Error: no test specified\" && exit 1"
   },
   "dependencies": {
-    "@azure/functions": "^4.0.0"
-  }
+    "@azure/functions": "^4.7.2",
+    "@azure/identity": "^4.10.0",
+    "@azure/keyvault-secrets": "^4.9.0",
+    "jsonwebtoken": "^9.0.2",
+    "jwks-rsa": "^3.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "azure-functions-core-tools": "^4.0.7317"
+  },
+  "optionalDependencies": {},
+  "peerDependencies": {}
 }

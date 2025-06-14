@@ -5,10 +5,14 @@
       "samplingSettings": {
         "isEnabled": true,
         "excludedTypes": "Request"
-      }
+      },
+      "enableLiveMetricsFilters": true
     },
     "logLevel": {
-      "default": "Information"
+      "default": "Information",
+      "Host.Results": "Error",
+      "Function": "Information",
+      "Host.Aggregator": "Warning"
     }
   },
   "extensionBundle": {
@@ -16,34 +20,21 @@
     "version": "[4.*, 6.0.0)"
   },
   "functionTimeout": "00:05:00",
-  "cors": {
-    "allowedOrigins": [
-      "http://localhost:5173",
-      "http://127.0.0.1:5173",
-      "https://localhost:5173",
-      "http://localhost:3000",
-      "http://127.0.0.1:3000",
-      "https://ashy-coast-0aeebe10f.6.azurestaticapps.net",
-      "*"
-    ],
-    "allowedMethods": [
-      "GET",
-      "POST",
-      "PUT",
-      "DELETE",
-      "OPTIONS"
-    ],
-    "allowedHeaders": [
-      "Content-Type",
-      "Authorization",
-      "Accept",
-      "X-Requested-With",
-      "X-Guest-Mode"
-    ],
-    "maxAge": 86400,
-    "supportCredentials": true
+  "healthMonitor": {
+    "enabled": true,
+    "healthCheckInterval": "00:00:10",
+    "healthCheckWindow": "00:02:00",
+    "healthCheckThreshold": 6,
+    "counterThreshold": 0.8
   },
-  "http": {
-    "routePrefix": "api"
+  "retry": {
+    "strategy": "exponentialBackoff",
+    "maxRetryCount": 3,
+    "minimumInterval": "00:00:02",
+    "maximumInterval": "00:00:30"
+  },
+  "concurrency": {
+    "dynamicConcurrencyEnabled": true,
+    "snapshotPersistenceEnabled": true
   }
 }

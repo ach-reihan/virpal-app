@@ -1,0 +1,31 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/Azure/azure-dev/main/schemas/v1.0/azure.yaml.json
+
+name: virpal-app
+metadata:
+  template: virpal-app@0.0.1-beta
+
+services:
+  virpal-api:
+    project: ./api
+    host: function
+    language: ts
+
+hooks:
+  preup:
+    shell: pwsh
+    run: |
+      Write-Host "Building Functions..."
+      npm run build:functions
+      Write-Host "Building Frontend..."
+      npm run build:frontend
+    continueOnError: false
+    interactive: true
+
+  postup:
+    shell: pwsh
+    run: |
+      Write-Host "Deployment completed successfully!"
+      Write-Host "Frontend URL: $(azd env get-values | grep AZURE_STATIC_WEB_APP_URL)"
+      Write-Host "API URL: $(azd env get-values | grep AZURE_FUNCTION_APP_URL)"
+    continueOnError: true
+    interactive: true

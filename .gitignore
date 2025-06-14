@@ -155,6 +155,7 @@ $RECYCLE.BIN/
 # ===== 📦 PACKAGE MANAGERS =====
 yarn.lock
 pnpm-lock.yaml
+package-lock.json
 
 # ===== 🐳 CONTAINERIZATION =====
 .dockerignore
