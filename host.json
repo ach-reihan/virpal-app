@@ -33,7 +33,8 @@
       "https://localhost:5173",
       "http://localhost:3000",
       "http://127.0.0.1:3000",
-      "https://ashy-coast-0aeebe10f.6.azurestaticapps.net"
+      "https://ashy-coast-0aeebe10f.6.azurestaticapps.net",
+      "*"
     ],
     "allowedMethods": [
       "GET",
@@ -45,7 +46,12 @@
     "allowedHeaders": [
       "Content-Type",
       "Authorization",
-      "Accept"
+      "Accept",
+      "X-Requested-With",
+      "X-Guest-Mode",
+      "Origin",
+      "Access-Control-Request-Method",
+      "Access-Control-Request-Headers"
     ],
     "maxAge": 86400,
     "supportCredentials": true

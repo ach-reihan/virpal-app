@@ -334,6 +334,26 @@ export async function getSecret(
   const requestId = context.invocationId;
   const timestamp = new Date().toISOString();
   const startTime = performance.now();
+
+  // Safety check for parameters
+  if (!request || !request.headers || !request.query) {
+    context.error('Invalid request object received:', typeof request);
+    return {
+      status: 500,
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+      },
+      jsonBody: {
+        success: false,
+        error: 'Invalid request object',
+        timestamp,
+      },
+    };
+  }
+
   // Minimal structured logging for production
   context.info(`Key Vault secret request: ${request.method} ${requestId}`); // Security: Add comprehensive CORS headers with flexible origin support
   const allowedOrigins = [
@@ -367,23 +387,26 @@ export async function getSecret(
       }
     }
   }
-
   const headers = {
     'Access-Control-Allow-Origin': allowOrigin,
     'Access-Control-Allow-Methods': 'GET, OPTIONS',
     'Access-Control-Allow-Headers':
-      'Content-Type, Accept, Authorization, X-Requested-With',
+      'Content-Type, Accept, Authorization, X-Requested-With, X-Guest-Mode',
     'Access-Control-Allow-Credentials': 'true',
     'Access-Control-Max-Age': '86400',
     'Content-Type': 'application/json',
     'X-Request-ID': requestId,
     'X-Content-Type-Options': 'nosniff',
     'X-Frame-Options': 'DENY',
-  }; // Handle preflight OPTIONS request
+  };
+
+  // Handle preflight OPTIONS request
   if (request.method === 'OPTIONS') {
+    context.info(`CORS preflight handled for origin: ${origin}`);
     return {
       status: 200,
       headers: headers,
+      body: '', // Empty body for OPTIONS
     };
   }
   try {

@@ -336,14 +336,14 @@ const getCorsHeaders = (origin?: string | null) => {
       allowOrigin = origin;
     }
   }
-
   return {
     'Content-Type': 'application/json',
     'Access-Control-Allow-Origin': allowOrigin,
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
     'Access-Control-Allow-Headers':
-      'Content-Type, Accept, Authorization, X-Guest-Mode',
+      'Content-Type, Accept, Authorization, X-Guest-Mode, X-Requested-With',
     'Access-Control-Max-Age': '86400', // 24 hours cache for preflight
+    'Access-Control-Allow-Credentials': 'true',
     'X-Content-Type-Options': 'nosniff',
     'X-Frame-Options': 'DENY',
     'X-XSS-Protection': '1; mode=block',
@@ -389,13 +389,13 @@ export async function chatCompletionHandler(
     `X-Guest-Mode: ${request.headers.get('X-Guest-Mode') || 'none'}`
   );
   context.info('===================================');
-
   // Handle CORS preflight requests
   if (request.method === 'OPTIONS') {
+    context.info(`CORS preflight handled for origin: ${origin}`);
     return {
       status: 200,
       headers: getCorsHeaders(origin),
-      body: '',
+      body: '', // Empty body for OPTIONS
     };
   }
 
