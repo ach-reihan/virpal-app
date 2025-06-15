@@ -1,13 +1,10 @@
 {
   "$schema": "https://json.schemastore.org/staticwebapp.config.json",
   "trailingSlash": "auto",
-  "platform": {
-    "apiRuntime": "node:20"
-  },
   "routes": [
     {
       "route": "/api/*",
-      "allowedRoles": ["authenticated", "anonymous"]
+      "statusCode": 404
     }
   ],
   "navigationFallback": {

@@ -32,8 +32,8 @@ jobs:
       - name: Install Dependencies
         run: npm install
 
-      - name: Build Frontend and Functions
-        run: npm run build
+      - name: Build Frontend Only
+        run: npm run build:frontend
 
       - name: Install OIDC Client from Core Package
         run: npm install @actions/core@1.6.0 @actions/http-client
