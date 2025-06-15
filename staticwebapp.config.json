@@ -6,13 +6,16 @@
   },
   "routes": [
     {
-      "route": "/*",
-      "rewrite": "/index.html"
+      "route": "/api/*",
+      "allowedRoles": ["authenticated", "anonymous"]
     }
   ],
   "navigationFallback": {
     "rewrite": "/index.html",
-    "exclude": ["/*.{css,scss,js,png,gif,ico,jpg,svg}"]
+    "exclude": [
+      "/assets/*",
+      "/*.{css,scss,js,png,gif,ico,jpg,svg,woff,woff2,ttf,eot,map}"
+    ]
   },
   "mimeTypes": {
     ".json": "text/json"
