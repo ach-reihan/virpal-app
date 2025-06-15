@@ -143,19 +143,24 @@ class JWTValidationService {
       const key = await this.jwksClient.getSigningKey(kid);
       return key.getPublicKey();
     } catch (error) {
-      // Enhanced error handling with more context
-      console.error('JWKS signing key error details:', {
-        kid,
-        error: error instanceof Error ? error.message : 'Unknown error',
-        jwksUri: `https://${this.config.tenantName}.ciamlogin.com/${this.config.tenantId}/discovery/v2.0/keys`,
-      });
+      // Enhanced error handling with more context (only in development)
+      const isDevelopment = process.env['NODE_ENV'] === 'development';
+      if (isDevelopment) {
+        console.error('JWKS signing key error details:', {
+          kid,
+          error: error instanceof Error ? error.message : 'Unknown error',
+          jwksUri: `https://${this.config.tenantName}.ciamlogin.com/${this.config.tenantId}/discovery/v2.0/keys`,
+        });
+      }
 
       // Try alternative JWKS URI format if the first one fails
       if (
         error instanceof Error &&
         error.message.includes('Unable to find a signing key')
       ) {
-        console.warn('Retrying with alternative JWKS URI format...');
+        if (isDevelopment) {
+          console.warn('Retrying with alternative JWKS URI format...');
+        }
 
         // Create a new client with alternative URI format
         const alternativeJwksUri = `https://${this.config.tenantId}.ciamlogin.com/${this.config.tenantId}/discovery/v2.0/keys`;
@@ -224,15 +229,16 @@ class JWTValidationService {
           isValid: false,
           error: 'Invalid token: missing algorithm (alg) in header',
         };
-      }
-
-      // Extract and validate kid
+      } // Extract and validate kid
       const kid = header.kid;
       if (!kid || typeof kid !== 'string' || kid.trim() === '') {
-        console.warn(
-          'JWT token missing or invalid kid in header. Full header:',
-          header
-        );
+        const isDevelopment = process.env['NODE_ENV'] === 'development';
+        if (isDevelopment) {
+          console.warn(
+            'JWT token missing or invalid kid in header. Full header:',
+            header
+          );
+        }
         return {
           isValid: false,
           error:
@@ -240,11 +246,14 @@ class JWTValidationService {
         };
       }
 
-      console.debug('JWT validation started', {
-        kid,
-        algorithm: decodedToken.header?.alg,
-        tokenType: decodedToken.header?.typ,
-      });
+      const isDevelopment = process.env['NODE_ENV'] === 'development';
+      if (isDevelopment) {
+        console.debug('JWT validation started', {
+          kid,
+          algorithm: decodedToken.header?.alg,
+          tokenType: decodedToken.header?.typ,
+        });
+      }
 
       // Step 2: Get signing key with enhanced error handling
       let signingKey: string;
@@ -544,39 +553,57 @@ class JWTValidationService {
  * Create JWT validation service dengan configuration dari environment variables
  */
 export function createJWTService(): JWTValidationService {
+  // Retrieve required environment variables - no fallback values for security
+  const tenantName = process.env['AZURE_TENANT_NAME'];
+  const tenantId = process.env['AZURE_TENANT_ID'];
+  const backendClientId = process.env['AZURE_BACKEND_CLIENT_ID'];
+  const userFlow = process.env['AZURE_USER_FLOW'] || '';
+
+  // Validate that all required environment variables are present
+  const missingVars: string[] = [];
+  if (!tenantName) missingVars.push('AZURE_TENANT_NAME');
+  if (!tenantId) missingVars.push('AZURE_TENANT_ID');
+  if (!backendClientId) missingVars.push('AZURE_BACKEND_CLIENT_ID');
+
+  if (missingVars.length > 0) {
+    const errorMessage =
+      `Missing required environment variables for JWT authentication: ${missingVars.join(
+        ', '
+      )}. ` +
+      'Please ensure these variables are set in your environment or .env file. ' +
+      'See .env.example for configuration template.';
+
+    console.error('JWT Service Configuration Error:', {
+      missingVariables: missingVars,
+      availableEnvVars: {
+        AZURE_TENANT_NAME: !!process.env['AZURE_TENANT_NAME'],
+        AZURE_TENANT_ID: !!process.env['AZURE_TENANT_ID'],
+        AZURE_BACKEND_CLIENT_ID: !!process.env['AZURE_BACKEND_CLIENT_ID'],
+        AZURE_USER_FLOW: !!process.env['AZURE_USER_FLOW'],
+      },
+    });
+
+    throw new Error(errorMessage);
+  }
   const config: JWTServiceConfig = {
-    tenantName: process.env['AZURE_TENANT_NAME'] || 'virpalapp',
-    tenantId:
-      process.env['AZURE_TENANT_ID'] || 'db0374b9-bb6f-4410-ad04-db7fe70f4d7b',
-    clientId:
-      process.env['AZURE_BACKEND_CLIENT_ID'] ||
-      '9ae4699e-0823-453e-b0f7-b614491a80a2',
-    userFlow: process.env['AZURE_USER_FLOW'] || '',
+    tenantName: tenantName!,
+    tenantId: tenantId!,
+    clientId: backendClientId!,
+    userFlow,
     // Use CIAM endpoints without user flow (External ID uses different format)
-    jwksUri: `https://${
-      process.env['AZURE_TENANT_NAME'] || 'virpalapp'
-    }.ciamlogin.com/${
-      process.env['AZURE_TENANT_ID'] || 'db0374b9-bb6f-4410-ad04-db7fe70f4d7b'
-    }/discovery/v2.0/keys`,
+    jwksUri: `https://${tenantName}.ciamlogin.com/${tenantId}/discovery/v2.0/keys`,
     // Issuer for CIAM (External ID) tokens - no user flow
-    issuer: `https://${
-      process.env['AZURE_TENANT_ID'] || 'db0374b9-bb6f-4410-ad04-db7fe70f4d7b'
-    }.ciamlogin.com/${
-      process.env['AZURE_TENANT_ID'] || 'db0374b9-bb6f-4410-ad04-db7fe70f4d7b'
-    }/v2.0`,
+    issuer: `https://${tenantId}.ciamlogin.com/${tenantId}/v2.0`,
     // For CIAM, audience should be the backend API client ID
-    audience:
-      process.env['AZURE_BACKEND_CLIENT_ID'] ||
-      '9ae4699e-0823-453e-b0f7-b614491a80a2',
+    audience: backendClientId!,
   };
 
-  // Validate configuration
-  const requiredFields = ['tenantName', 'tenantId', 'clientId'];
-  for (const field of requiredFields) {
-    if (!config[field as keyof JWTServiceConfig]) {
-      throw new Error(`Missing required JWT configuration: ${field}`);
-    }
-  }
+  console.info('JWT Service initialized with environment variables', {
+    tenantName: tenantName!.substring(0, 3) + '***', // Partial logging for security
+    tenantId: tenantId!.substring(0, 8) + '***',
+    clientId: backendClientId!.substring(0, 8) + '***',
+    hasUserFlow: !!userFlow,
+  });
 
   return new JWTValidationService(config);
 }

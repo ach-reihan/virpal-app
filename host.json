@@ -36,13 +36,7 @@
       "https://ashy-coast-0aeebe10f.6.azurestaticapps.net",
       "*"
     ],
-    "allowedMethods": [
-      "GET",
-      "POST",
-      "PUT",
-      "DELETE",
-      "OPTIONS"
-    ],
+    "allowedMethods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     "allowedHeaders": [
       "Content-Type",
       "Authorization",

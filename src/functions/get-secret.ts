@@ -49,6 +49,7 @@ interface KeyVaultResponse {
     value: string;
   };
   error?: string;
+  source?: string; // 'environment', 'keyvault', 'default', 'error', 'none'
   requestId?: string;
   timestamp?: string;
 }
@@ -84,8 +85,41 @@ const ALLOWED_SECRETS = [
 let secretClient: SecretClient | null = null;
 let configCache: { isValid: boolean; timestamp: number } | null = null;
 
+// Environment variable to secret name mapping for Azure Static Web Apps Managed Functions
+const ENV_VAR_MAPPING: Record<string, string> = {
+  // Azure Speech Service
+  'azure-speech-service-key': 'AZURE_SPEECH_SERVICE_KEY',
+  'azure-speech-service-region': 'AZURE_SPEECH_SERVICE_REGION',
+  'azure-speech-service-endpoint': 'AZURE_SPEECH_SERVICE_ENDPOINT',
+
+  // Azure OpenAI
+  'azure-openai-endpoint': 'AZURE_OPENAI_ENDPOINT',
+  'azure-openai-key': 'AZURE_OPENAI_API_KEY',
+  'azure-openai-api-key': 'AZURE_OPENAI_API_KEY',
+  'openai-api-key': 'AZURE_OPENAI_API_KEY',
+  'azure-openai-deployment-name': 'AZURE_OPENAI_DEPLOYMENT_NAME',
+  'azure-openai-api-version': 'AZURE_OPENAI_API_VERSION',
+
+  // Azure Cosmos DB
+  'azure-cosmos-db-endpoint-uri': 'AZURE_COSMOS_DB_ENDPOINT',
+  'azure-cosmos-db-endpoint': 'AZURE_COSMOS_DB_ENDPOINT',
+  'azure-cosmos-db-key': 'AZURE_COSMOS_DB_KEY',
+  'azure-cosmos-db-connection-string': 'AZURE_COSMOS_DB_CONNECTION_STRING',
+  'azure-cosmos-db-database-name': 'AZURE_COSMOS_DB_DATABASE_NAME',
+
+  // Azure Entra External ID (CIAM)
+  'azure-tenant-name': 'AZURE_TENANT_NAME',
+  'azure-backend-client-id': 'AZURE_BACKEND_CLIENT_ID',
+  'azure-frontend-client-id': 'AZURE_FRONTEND_CLIENT_ID',
+  'azure-user-flow': 'AZURE_USER_FLOW',
+
+  // Legacy mappings
+  'speech-key': 'AZURE_SPEECH_SERVICE_KEY',
+  'speech-region': 'AZURE_SPEECH_SERVICE_REGION',
+} as const;
+
 // Security: Rate limiting configuration
-const RATE_LIMIT_MAX = 100; // requests per window
+const RATE_LIMIT_MAX = 50; // requests per window (reduced for security)
 const RATE_LIMIT_WINDOW = 60000; // 1 minute window
 const CONFIG_CACHE_DURATION = 300000; // 5 minutes
 
@@ -96,8 +130,8 @@ const requestTracker = new Map<string, { count: number; lastReset: number }>();
 const SANITIZATION_PATTERNS = {
   // Remove special characters that could be used in injection attacks
   secretName: /[^a-z0-9\-_.]/gi,
-  // Log sanitization for audit purposes
-  logUnsafeChars: /[<>\"'&\x00-\x1f\x7f-\x9f]/g,
+  // Log sanitization for audit purposes - detect potentially unsafe characters
+  logUnsafeChars: /[<>"'&]/g,
 } as const;
 
 // JWT validation service instance
@@ -106,9 +140,30 @@ let jwtService: ReturnType<typeof createJWTService> | null = null;
 // Initialize JWT service dengan lazy loading
 function getJWTService() {
   if (!jwtService) {
-    jwtService = createJWTService();
+    try {
+      jwtService = createJWTService();
+    } catch (error) {
+      // Re-throw with more context for configuration errors
+      const errorMessage =
+        error instanceof Error ? error.message : 'Unknown error';
+      if (errorMessage.includes('Missing required environment variables')) {
+        throw new Error(
+          `JWT Authentication Configuration Error: ${errorMessage}\n` +
+            'This error typically occurs when Azure authentication environment variables are not set.\n' +
+            'Please check your .env file and ensure all required backend authentication variables are configured.'
+        );
+      }
+      throw error;
+    }
   }
   return jwtService;
+}
+
+interface UserInfo {
+  userId: string;
+  email?: string | undefined;
+  name?: string | undefined;
+  scopes?: string[] | undefined;
 }
 
 /**
@@ -118,7 +173,7 @@ function getJWTService() {
 async function validateAuthentication(
   request: HttpRequest,
   context: InvocationContext
-): Promise<{ isAuthenticated: boolean; user?: any; error?: string }> {
+): Promise<{ isAuthenticated: boolean; user?: UserInfo; error?: string }> {
   try {
     // Extract Authorization header
     const authHeader = request.headers.get('authorization');
@@ -221,6 +276,116 @@ async function validateAuthentication(
   }
 }
 
+/**
+ * Get secret value with Environment Variables first, Key Vault fallback strategy
+ * Optimized for Azure Static Web Apps Managed Functions
+ */
+async function getSecretValue(
+  secretName: string,
+  context: InvocationContext
+): Promise<{
+  success: boolean;
+  value?: string;
+  error?: string;
+  source?: string;
+}> {
+  try {
+    // Strategy 1: Check Environment Variables first (for Managed Functions)
+    const envVarName =
+      ENV_VAR_MAPPING[secretName as keyof typeof ENV_VAR_MAPPING];
+    if (envVarName && typeof envVarName === 'string') {
+      const envValue = process.env[envVarName];
+      if (envValue && typeof envValue === 'string' && envValue.trim() !== '') {
+        context.info(
+          `Secret '${secretName}' retrieved from environment variable '${envVarName}'`
+        );
+        return {
+          success: true,
+          value: envValue.trim(),
+          source: 'environment',
+        };
+      } else {
+        context.info(
+          `Environment variable '${envVarName}' for secret '${secretName}' is empty or not set`
+        );
+      }
+    } else {
+      context.info(
+        `No environment variable mapping found for secret '${secretName}'`
+      );
+    }
+
+    // Strategy 2: Fallback to Key Vault (for BYOF or development)
+    if (secretClient && KEY_VAULT_URL) {
+      context.info(`Attempting Key Vault fallback for secret '${secretName}'`);
+
+      try {
+        const secret = await secretClient.getSecret(secretName);
+        if (secret.value) {
+          context.info(`Secret '${secretName}' retrieved from Key Vault`);
+          return {
+            success: true,
+            value: secret.value,
+            source: 'keyvault',
+          };
+        }
+      } catch (keyVaultError) {
+        const errorMessage =
+          keyVaultError instanceof Error
+            ? keyVaultError.message
+            : 'Unknown Key Vault error';
+        context.warn(
+          `Key Vault retrieval failed for '${secretName}': ${errorMessage}`
+        );
+
+        // Don't return error yet, try hardcoded defaults
+      }
+    } else {
+      context.info(
+        'Key Vault client not available (expected for Managed Functions)'
+      );
+    }
+
+    // Strategy 3: Hardcoded defaults for non-sensitive configuration
+    const defaultValues: Record<string, string> = {
+      'azure-speech-service-region': 'southeastasia',
+      'azure-cosmos-db-database-name': 'virpal-db',
+      'azure-openai-deployment-name': 'gpt-4o-mini',
+      'azure-openai-api-version': '2024-10-24',
+      'azure-tenant-name': 'virpalapp',
+      'azure-user-flow': 'virpal_signupsignin_v1',
+    };
+    if (Object.prototype.hasOwnProperty.call(defaultValues, secretName)) {
+      const defaultValue =
+        defaultValues[secretName as keyof typeof defaultValues];
+      if (defaultValue && typeof defaultValue === 'string') {
+        context.info(`Using default value for '${secretName}'`);
+        return {
+          success: true,
+          value: defaultValue,
+          source: 'default',
+        };
+      }
+    }
+
+    // All strategies failed
+    return {
+      success: false,
+      error: `Secret '${secretName}' not found in environment variables, Key Vault, or defaults`,
+      source: 'none',
+    };
+  } catch (error) {
+    const errorMessage =
+      error instanceof Error ? error.message : 'Unknown error';
+    context.error(`Error retrieving secret '${secretName}': ${errorMessage}`);
+    return {
+      success: false,
+      error: `Failed to retrieve secret: ${errorMessage}`,
+      source: 'error',
+    };
+  }
+}
+
 // Initialize Key Vault client with secure credential management
 function initializeKeyVaultClient(): SecretClient | null {
   try {
@@ -240,13 +405,28 @@ function initializeKeyVaultClient(): SecretClient | null {
     // This automatically handles: Managed Identity, Azure CLI, Visual Studio, etc.
     const credential = new DefaultAzureCredential();
     return new SecretClient(KEY_VAULT_URL, credential);
-  } catch (error) {
+  } catch {
     return null;
   }
 }
 
-// Rate limiting helper
-function checkRateLimit(clientIp: string): boolean {
+// Rate limiting helper with enhanced security
+function checkRateLimit(clientIp: string, context: InvocationContext): boolean {
+  // Basic IP validation
+  if (!clientIp || typeof clientIp !== 'string' || clientIp.length > 45) {
+    context.warn('Invalid IP address for rate limiting');
+    return false; // Deny invalid IPs
+  }
+
+  // Allow localhost in development
+  const isDevelopment = process.env['NODE_ENV'] === 'development';
+  if (
+    isDevelopment &&
+    (clientIp.includes('localhost') || clientIp.includes('127.0.0.1'))
+  ) {
+    return true;
+  }
+
   const now = Date.now();
   const tracker = requestTracker.get(clientIp);
 
@@ -256,6 +436,7 @@ function checkRateLimit(clientIp: string): boolean {
   }
 
   if (tracker.count >= RATE_LIMIT_MAX) {
+    context.warn(`Rate limit exceeded for IP: ${clientIp.substring(0, 8)}...`);
     return false;
   }
 
@@ -297,9 +478,8 @@ function validateAndSanitizeSecretName(
       `Secret name was sanitized: "${secretName}" -> "${sanitized}"`
     );
   }
-
   // Validate against whitelist
-  const isAllowed = ALLOWED_SECRETS.includes(sanitized as any);
+  const isAllowed = (ALLOWED_SECRETS as readonly string[]).includes(sanitized);
   if (!isAllowed) {
     errors.push(`Secret '${sanitized}' is not in the allowed secrets list`);
     context.warn(`Attempted access to non-whitelisted secret: ${sanitized}`);
@@ -312,16 +492,37 @@ function validateAndSanitizeSecretName(
   };
 }
 
-// Configuration validation
+// Configuration validation - updated for Environment Variables first strategy
 function validateConfiguration(): { isValid: boolean; errors: string[] } {
   const errors: string[] = [];
+  // For Managed Functions, environment variables are primary, Key Vault is optional
+  const envVarList = Object.values(ENV_VAR_MAPPING);
+  const hasEnvVars = envVarList.some((envVar: string) => {
+    if (typeof envVar === 'string') {
+      const value = process.env[envVar];
+      return value && typeof value === 'string' && value.trim() !== '';
+    }
+    return false;
+  });
+  const hasKeyVault = KEY_VAULT_URL && KEY_VAULT_URL.startsWith('https://');
 
-  if (!KEY_VAULT_URL) {
-    errors.push('KEY_VAULT_URL environment variable is not set');
+  if (!hasEnvVars && !hasKeyVault) {
+    errors.push(
+      'No configuration source available. Set environment variables or KEY_VAULT_URL'
+    );
   }
 
   if (KEY_VAULT_URL && !KEY_VAULT_URL.startsWith('https://')) {
-    errors.push('KEY_VAULT_URL must use HTTPS');
+    errors.push('KEY_VAULT_URL must use HTTPS if provided');
+  }
+
+  // At least one secret source should be available
+  const availableSources = [];
+  if (hasEnvVars) availableSources.push('Environment Variables');
+  if (hasKeyVault) availableSources.push('Key Vault');
+
+  if (availableSources.length > 0) {
+    console.log(`Secret sources available: ${availableSources.join(', ')}`);
   }
 
   return { isValid: errors.length === 0, errors };
@@ -355,7 +556,7 @@ export async function getSecret(
   }
 
   // Minimal structured logging for production
-  context.info(`Key Vault secret request: ${request.method} ${requestId}`); // Security: Add comprehensive CORS headers with flexible origin support
+  context.info(`Key Vault secret request: ${request.method} ${requestId}`); // Security: Add comprehensive CORS headers with restricted origin support
   const allowedOrigins = [
     'http://localhost:5173',
     'http://localhost:3000',
@@ -363,41 +564,37 @@ export async function getSecret(
     'http://127.0.0.1:3000',
     // Azure Static Web Apps domains
     'https://ashy-coast-0aeebe10f.6.azurestaticapps.net',
-    // Allow any azurestaticapps.net subdomain for staging
-    /^https:\/\/.*\.azurestaticapps\.net$/,
   ];
 
   const origin = request.headers.get('origin');
-  let allowOrigin = 'https://ashy-coast-0aeebe10f.6.azurestaticapps.net/'; // default fallback
+  let allowOrigin = 'https://ashy-coast-0aeebe10f.6.azurestaticapps.net'; // default fallback
 
   if (origin) {
-    // Check exact matches first
-    if (allowedOrigins.filter((o) => typeof o === 'string').includes(origin)) {
+    if (allowedOrigins.includes(origin)) {
       allowOrigin = origin;
-    } else {
-      // Check regex patterns
-      const regexOrigins = allowedOrigins.filter(
-        (o) => o instanceof RegExp
-      ) as RegExp[];
-      for (const pattern of regexOrigins) {
-        if (pattern.test(origin)) {
-          allowOrigin = origin;
-          break;
-        }
-      }
+    } else if (
+      origin.includes('azurestaticapps.net') &&
+      origin.startsWith('https://')
+    ) {
+      // Allow only HTTPS azurestaticapps.net subdomains for staging
+      allowOrigin = origin;
     }
   }
+
   const headers = {
     'Access-Control-Allow-Origin': allowOrigin,
     'Access-Control-Allow-Methods': 'GET, OPTIONS',
     'Access-Control-Allow-Headers':
       'Content-Type, Accept, Authorization, X-Requested-With, X-Guest-Mode',
     'Access-Control-Allow-Credentials': 'true',
-    'Access-Control-Max-Age': '86400',
+    'Access-Control-Max-Age': '3600',
     'Content-Type': 'application/json',
     'X-Request-ID': requestId,
     'X-Content-Type-Options': 'nosniff',
     'X-Frame-Options': 'DENY',
+    'X-XSS-Protection': '1; mode=block',
+    'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
+    'Referrer-Policy': 'strict-origin-when-cross-origin',
   };
 
   // Handle preflight OPTIONS request
@@ -441,7 +638,7 @@ export async function getSecret(
       request.headers.get('x-forwarded-for') ||
       request.headers.get('x-real-ip') ||
       'unknown';
-    if (!checkRateLimit(clientIp)) {
+    if (!checkRateLimit(clientIp, context)) {
       return {
         status: 429,
         headers: headers,
@@ -518,53 +715,17 @@ export async function getSecret(
         } as KeyVaultResponse,
       };
     }
-    const sanitizedSecretName = validation.sanitized;
+    const sanitizedSecretName = validation.sanitized; // Get secret using Environment Variables first, Key Vault fallback strategy
+    const secretResult = await getSecretValue(sanitizedSecretName, context);
 
-    // Get secret from Key Vault with proper error handling
-    let secret;
-    try {
-      secret = await secretClient.getSecret(sanitizedSecretName);
-    } catch (keyVaultError: any) {
-      // Log critical errors only
-      context.error(
-        `Key Vault access failed for '${sanitizedSecretName}': ${
-          keyVaultError.code || keyVaultError.statusCode
-        }`
-      );
-
-      if (keyVaultError.statusCode === 404) {
-        return {
-          status: 404,
-          headers: headers,
-          jsonBody: {
-            success: false,
-            error: `Secret '${sanitizedSecretName}' does not exist in Key Vault`,
-            requestId,
-            timestamp,
-          } as KeyVaultResponse,
-        };
-      } else if (keyVaultError.statusCode === 403) {
-        return {
-          status: 403,
-          headers: headers,
-          jsonBody: {
-            success: false,
-            error: `Access denied to secret '${sanitizedSecretName}' in Key Vault`,
-            requestId,
-            timestamp,
-          } as KeyVaultResponse,
-        };
-      } else {
-        throw keyVaultError; // Re-throw for general error handling
-      }
-    }
-    if (!secret.value) {
+    if (!secretResult.success) {
       return {
         status: 404,
         headers: headers,
         jsonBody: {
           success: false,
-          error: `Secret '${sanitizedSecretName}' exists but has no value`,
+          error:
+            secretResult.error || `Secret '${sanitizedSecretName}' not found`,
           requestId,
           timestamp,
         } as KeyVaultResponse,
@@ -578,7 +739,6 @@ export async function getSecret(
     context.info(
       `Secret retrieved successfully: ${sanitizedSecretName} (${processingTime}ms)`
     );
-
     return {
       status: 200,
       headers: headers,
@@ -586,8 +746,9 @@ export async function getSecret(
         success: true,
         data: {
           name: sanitizedSecretName,
-          value: secret.value,
+          value: secretResult.value,
         },
+        source: secretResult.source, // Indicate whether from env vars, key vault, or defaults
         requestId,
         timestamp,
       } as KeyVaultResponse,

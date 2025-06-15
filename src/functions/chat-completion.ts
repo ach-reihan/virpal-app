@@ -23,10 +23,9 @@ import type {
   InvocationContext,
 } from '@azure/functions';
 import { app } from '@azure/functions';
-import { keyVaultService } from '../services/azureKeyVaultService.js';
 import { createJWTService } from './jwtValidationService.js';
 
-// Performance optimization: Cache configuration to avoid repeated Key Vault calls
+// Performance optimization: Cache configuration to avoid repeated calls
 let configCache: {
   endpoint: string;
   apiKey: string;
@@ -37,13 +36,46 @@ let configCache: {
 
 const CONFIG_CACHE_DURATION = 5 * 60 * 1000; // 5 minutes cache
 
+// Rate limiting configuration
+const RATE_LIMIT_MAX = 30; // requests per window per IP
+const RATE_LIMIT_WINDOW = 60000; // 1 minute window
+const requestTracker = new Map<string, { count: number; lastReset: number }>();
+
+// Environment variable to secret name mapping for Azure Static Web Apps Managed Functions
+const CONFIG_ENV_MAPPING = {
+  'azure-openai-endpoint': 'AZURE_OPENAI_ENDPOINT',
+  'azure-openai-key': 'AZURE_OPENAI_API_KEY',
+  'azure-openai-deployment-name': 'AZURE_OPENAI_DEPLOYMENT_NAME',
+  'azure-openai-api-version': 'AZURE_OPENAI_API_VERSION',
+} as const;
+
+// Default values for non-sensitive configuration
+const CONFIG_DEFAULTS = {
+  'azure-openai-deployment-name': 'gpt-4o-mini',
+  'azure-openai-api-version': '2024-10-24',
+} as const;
+
 // JWT validation service instance
 let jwtService: ReturnType<typeof createJWTService> | null = null;
 
 // Initialize JWT service dengan lazy loading
 function getJWTService() {
   if (!jwtService) {
-    jwtService = createJWTService();
+    try {
+      jwtService = createJWTService();
+    } catch (error) {
+      // Re-throw with more context for configuration errors
+      const errorMessage =
+        error instanceof Error ? error.message : 'Unknown error';
+      if (errorMessage.includes('Missing required environment variables')) {
+        throw new Error(
+          `JWT Authentication Configuration Error: ${errorMessage}\n` +
+            'This error typically occurs when Azure authentication environment variables are not set.\n' +
+            'Please check your .env file and ensure all required backend authentication variables are configured.'
+        );
+      }
+      throw error;
+    }
   }
   return jwtService;
 }
@@ -89,11 +121,19 @@ function validateRequest(requestData: ChatCompletionRequest): {
     return { isValid: false, error: 'userInput must be a string' };
   }
 
-  // Security: Prevent overly long inputs
+  // Security: Prevent overly long inputs and potential DoS
   if (requestData.userInput.length > 4000) {
     return {
       isValid: false,
       error: 'userInput exceeds maximum length of 4000 characters',
+    };
+  }
+
+  // Security: Basic XSS prevention - reject obvious script tags
+  if (/<script[^>]*>.*?<\/script>/gi.test(requestData.userInput)) {
+    return {
+      isValid: false,
+      error: 'userInput contains potentially harmful content',
     };
   }
 
@@ -108,20 +148,81 @@ function validateRequest(requestData: ChatCompletionRequest): {
   // Validate temperature range
   if (
     requestData.temperature !== undefined &&
-    (requestData.temperature < 0 || requestData.temperature > 2)
+    (typeof requestData.temperature !== 'number' ||
+      requestData.temperature < 0 ||
+      requestData.temperature > 2)
   ) {
-    return { isValid: false, error: 'temperature must be between 0 and 2' };
+    return {
+      isValid: false,
+      error: 'temperature must be a number between 0 and 2',
+    };
   }
 
   // Validate token limits
   if (
     requestData.maxTokens !== undefined &&
-    (requestData.maxTokens < 1 || requestData.maxTokens > 4000)
+    (typeof requestData.maxTokens !== 'number' ||
+      requestData.maxTokens < 1 ||
+      requestData.maxTokens > 4000)
   ) {
-    return { isValid: false, error: 'maxTokens must be between 1 and 4000' };
+    return {
+      isValid: false,
+      error: 'maxTokens must be a number between 1 and 4000',
+    };
   }
 
+  // Validate system prompt if provided
+  if (requestData.systemPrompt !== undefined) {
+    if (typeof requestData.systemPrompt !== 'string') {
+      return { isValid: false, error: 'systemPrompt must be a string' };
+    }
+    if (requestData.systemPrompt.length > 2000) {
+      return {
+        isValid: false,
+        error: 'systemPrompt exceeds maximum length of 2000 characters',
+      };
+    }
+  }
   return { isValid: true };
+}
+
+// Rate limiting helper
+function checkChatRateLimit(
+  clientIp: string,
+  context: InvocationContext
+): boolean {
+  // Basic IP validation
+  if (!clientIp || typeof clientIp !== 'string' || clientIp.length > 45) {
+    context.warn('Invalid IP address for rate limiting');
+    return false; // Deny invalid IPs
+  }
+
+  // Allow localhost in development
+  const isDevelopment = process.env['NODE_ENV'] === 'development';
+  if (
+    isDevelopment &&
+    (clientIp.includes('localhost') || clientIp.includes('127.0.0.1'))
+  ) {
+    return true;
+  }
+
+  const now = Date.now();
+  const tracker = requestTracker.get(clientIp);
+
+  if (!tracker || now - tracker.lastReset > RATE_LIMIT_WINDOW) {
+    requestTracker.set(clientIp, { count: 1, lastReset: now });
+    return true;
+  }
+
+  if (tracker.count >= RATE_LIMIT_MAX) {
+    context.warn(
+      `Chat rate limit exceeded for IP: ${clientIp.substring(0, 8)}...`
+    );
+    return false;
+  }
+
+  tracker.count++;
+  return true;
 }
 
 /**
@@ -213,6 +314,65 @@ async function validateAuthentication(
   }
 }
 
+/**
+ * Get configuration value with Environment Variables first strategy
+ * Optimized for Azure Static Web Apps Managed Functions
+ */
+function getConfigValue(
+  configName: keyof typeof CONFIG_ENV_MAPPING,
+  context: InvocationContext
+): string | null {
+  try {
+    // Strategy 1: Check Environment Variables first (for Managed Functions)
+    const envVarName =
+      CONFIG_ENV_MAPPING[configName as keyof typeof CONFIG_ENV_MAPPING];
+    if (envVarName && typeof envVarName === 'string') {
+      const envValue = process.env[envVarName];
+      if (
+        envValue &&
+        typeof envValue === 'string' &&
+        envValue.trim() !== '' &&
+        envValue.length > 0 &&
+        envValue.length < 2048 // Reasonable limit for config values
+      ) {
+        context.info(
+          `Config '${configName}' retrieved from environment variable '${envVarName}'`
+        );
+        return envValue.trim();
+      } else {
+        context.info(
+          `Environment variable '${envVarName}' for config '${configName}' is empty or not set`
+        );
+      }
+    } else {
+      context.info(
+        `No environment variable mapping found for config '${configName}'`
+      );
+    }
+
+    // Strategy 2: Hardcoded defaults for non-sensitive configuration
+    if (Object.prototype.hasOwnProperty.call(CONFIG_DEFAULTS, configName)) {
+      const defaultValue =
+        CONFIG_DEFAULTS[configName as keyof typeof CONFIG_DEFAULTS];
+      if (defaultValue && typeof defaultValue === 'string') {
+        context.info(`Using default value for '${configName}'`);
+        return defaultValue;
+      }
+    }
+
+    // All strategies failed
+    context.warn(
+      `Config '${configName}' not found in environment variables or defaults`
+    );
+    return null;
+  } catch (error) {
+    const errorMessage =
+      error instanceof Error ? error.message : 'Unknown error';
+    context.error(`Error retrieving config '${configName}': ${errorMessage}`);
+    return null;
+  }
+}
+
 // Configuration retrieval with caching and error handling
 async function getConfiguration(context: InvocationContext): Promise<{
   endpoint: string;
@@ -232,44 +392,51 @@ async function getConfiguration(context: InvocationContext): Promise<{
   }
 
   try {
-    // Defensive programming: Check service availability
-    if (!keyVaultService) {
-      context.error('Key Vault service not available');
-      return null;
-    }
-
-    // Parallel execution for better performance
-    const [endpoint, deploymentName, apiVersion, apiKey] = await Promise.all([
-      keyVaultService.getSecret('azure-openai-endpoint'),
-      keyVaultService.getSecret('azure-openai-deployment-name'),
-      keyVaultService.getSecret('azure-openai-api-version'),
-      keyVaultService.getSecret('azure-openai-key'),
-    ]);
+    // Get configuration using Environment Variables first strategy
+    const endpoint = getConfigValue('azure-openai-endpoint', context);
+    const apiKey = getConfigValue('azure-openai-key', context);
+    const deploymentName = getConfigValue(
+      'azure-openai-deployment-name',
+      context
+    );
+    const apiVersion = getConfigValue('azure-openai-api-version', context);
 
     // Validate all required configuration is present
-    if (!endpoint || !apiKey || !deploymentName || !apiVersion) {
-      context.error('Missing required configuration values');
+    if (!endpoint || !apiKey) {
+      context.error(
+        'Missing required configuration values: endpoint and apiKey are required'
+      );
       return null;
     }
+
+    // Use defaults for optional values if not provided
+    const finalDeploymentName =
+      deploymentName || CONFIG_DEFAULTS['azure-openai-deployment-name'];
+    const finalApiVersion =
+      apiVersion || CONFIG_DEFAULTS['azure-openai-api-version'];
 
     // Update cache with new configuration
     configCache = {
       endpoint,
       apiKey,
-      deploymentName,
-      apiVersion,
+      deploymentName: finalDeploymentName,
+      apiVersion: finalApiVersion,
       timestamp: now,
     };
+
+    context.info(
+      `Configuration loaded successfully: ${endpoint}, deployment: ${finalDeploymentName}, version: ${finalApiVersion}`
+    );
 
     return {
       endpoint,
       apiKey,
-      deploymentName,
-      apiVersion,
+      deploymentName: finalDeploymentName,
+      apiVersion: finalApiVersion,
     };
   } catch (error) {
     context.error(
-      'Failed to retrieve configuration from Key Vault:',
+      'Failed to retrieve configuration:',
       error instanceof Error ? error.message : 'Unknown error'
     );
     return null;
@@ -326,28 +493,33 @@ const getCorsHeaders = (origin?: string | null) => {
     'https://ashy-coast-0aeebe10f.6.azurestaticapps.net',
   ];
 
-  // Check if origin is allowed
-  let allowOrigin = 'https://ashy-coast-0aeebe10f.6.azurestaticapps.net/'; // default fallback
+  // Check if origin is allowed - more restrictive approach
+  let allowOrigin = 'https://ashy-coast-0aeebe10f.6.azurestaticapps.net'; // default fallback
   if (origin) {
     if (allowedOrigins.includes(origin)) {
       allowOrigin = origin;
-    } else if (origin.includes('azurestaticapps.net')) {
-      // Allow any azurestaticapps.net subdomain for staging
+    } else if (
+      origin.includes('azurestaticapps.net') &&
+      origin.startsWith('https://')
+    ) {
+      // Allow only HTTPS azurestaticapps.net subdomains for staging
       allowOrigin = origin;
     }
   }
+
   return {
     'Content-Type': 'application/json',
     'Access-Control-Allow-Origin': allowOrigin,
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
     'Access-Control-Allow-Headers':
       'Content-Type, Accept, Authorization, X-Guest-Mode, X-Requested-With',
-    'Access-Control-Max-Age': '86400', // 24 hours cache for preflight
+    'Access-Control-Max-Age': '3600', // 1 hour cache for preflight
     'Access-Control-Allow-Credentials': 'true',
     'X-Content-Type-Options': 'nosniff',
     'X-Frame-Options': 'DENY',
     'X-XSS-Protection': '1; mode=block',
     'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
+    'Referrer-Policy': 'strict-origin-when-cross-origin',
   };
 };
 
@@ -398,7 +570,6 @@ export async function chatCompletionHandler(
       body: '', // Empty body for OPTIONS
     };
   }
-
   // Security: Only allow POST requests
   if (request.method !== 'POST') {
     return {
@@ -406,6 +577,23 @@ export async function chatCompletionHandler(
       headers: getCorsHeaders(origin),
       body: JSON.stringify({
         error: 'Method not allowed. Use POST.',
+        requestId,
+      }),
+    };
+  }
+
+  // Rate limiting check
+  const clientIp =
+    request.headers.get('x-forwarded-for') ||
+    request.headers.get('x-real-ip') ||
+    'unknown';
+
+  if (!checkChatRateLimit(clientIp, context)) {
+    return {
+      status: 429,
+      headers: getCorsHeaders(origin),
+      body: JSON.stringify({
+        error: 'Rate limit exceeded. Please try again later.',
         requestId,
       }),
     };
