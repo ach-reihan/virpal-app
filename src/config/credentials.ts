@@ -55,11 +55,11 @@ export interface AzureCredentials {
  */
 export const HACKATHON_CREDENTIALS: AzureCredentials = {
   openAI: {
-    endpoint: 'https://reiha-matmpsh6-eastus2.cognitiveservices.azure.com/',
+    endpoint: 'https://reiha-matmpsh6-eastus2.cognitiveservices.azure.com',
     apiKey:
       '61g44dK4hEeZIBrk5EHiNVfNzxkRXu3Uhj0dKNQXGQFUYcPcEKD4JQQJ99BEACHYHv6XJ3w3AAAAACOGl55q',
     deploymentName: 'gpt-4o-mini',
-    apiVersion: '2024-10-24',
+    apiVersion: '2024-10-01-preview',
   },
 
   cosmosDB: {

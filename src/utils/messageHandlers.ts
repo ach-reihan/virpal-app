@@ -17,7 +17,7 @@
  * For licensing inquiries: reihan3000@gmail.com
  */
 
-import { getAzureOpenAICompletion } from '../services/azureFunctionService';
+import { getDirectOpenAICompletion } from '../services/azureOpenAIDirect';
 import { playSmartTTS } from '../services/azureSpeechService';
 import type { AvatarExpression, ChatMessage } from '../types';
 import { SYSTEM_PROMPT } from './constants';
@@ -58,7 +58,7 @@ export const handleUserSendMessage = async (
   setVirpalExpression('thinking');
 
   try {
-    const aiResponseText = await getAzureOpenAICompletion(messageText, {
+    const aiResponseText = await getDirectOpenAICompletion(messageText, {
       systemPrompt: SYSTEM_PROMPT,
       messageHistory: messages.map((m) => ({
         role: m.sender === 'user' ? 'user' : 'assistant',

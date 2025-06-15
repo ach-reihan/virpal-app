@@ -19,10 +19,10 @@
 import { app } from '@azure/functions';
 
 // Import functions to register them with the Azure Functions runtime
-import './functions/chat-completion.js';
-import './functions/get-secret.js';
-import './functions/health.js';
-import './functions/test-chat-runtime.js';
+// import './functions/chat-completion.js';
+// import './functions/get-secret.js';
+// import './functions/health.js';
+// import './functions/test-chat-runtime.js';
 
 app.setup({
   enableHttpStream: true,
