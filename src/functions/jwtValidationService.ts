@@ -137,38 +137,84 @@ class JWTValidationService {
     });
   }
   /**
-   * Get signing key dari JWKS endpoint
+   * Get signing key dari JWKS endpoint dengan fallback mechanism
    */
-  private async getSigningKey(kid: string): Promise<string> {
+  private async getSigningKey(kid?: string): Promise<string> {
     try {
-      const key = await this.jwksClient.getSigningKey(kid);
-      return key.getPublicKey();
+      // Jika ada kid, coba gunakan kid tersebut
+      if (kid) {
+        try {
+          const key = await this.jwksClient.getSigningKey(kid);
+          return key.getPublicKey();
+        } catch {
+          console.warn(`Failed to get key with kid ${kid}, trying fallback...`);
+        }
+      }
+
+      // Fallback: coba tanpa kid - ambil key pertama yang tersedia
+      // Untuk production, kita tidak terlalu bergantung pada kid
+      const fallbackKey = await this.getFallbackSigningKey();
+      if (fallbackKey) {
+        return fallbackKey;
+      }
+
+      throw new Error('No signing keys available');
     } catch (error) {
-      // Log error without exposing sensitive key information
-      throw new Error('Failed to get signing key');
+      throw new Error(
+        `Failed to get signing key: ${
+          error instanceof Error ? error.message : 'Unknown error'
+        }`
+      );
     }
   }
-
   /**
-   * Validate JWT token
-   */ async validateToken(
+   * Get fallback signing key - ambil key pertama yang tersedia
+   */
+  private async getFallbackSigningKey(): Promise<string | null> {
+    try {
+      // Fetch JWKS untuk mendapatkan key pertama
+      const jwksResponse = await fetch(
+        `https://${this.config.tenantName}.ciamlogin.com/${this.config.tenantId}/discovery/v2.0/keys`
+      );
+
+      if (!jwksResponse.ok) {
+        throw new Error(`JWKS fetch failed: ${jwksResponse.status}`);
+      }
+
+      const jwks = (await jwksResponse.json()) as {
+        keys?: Array<{ kty: string; use: string; kid: string }>;
+      };
+
+      // Ambil key pertama yang valid untuk signing
+      for (const key of jwks.keys || []) {
+        if (key.kty === 'RSA' && key.use === 'sig' && key.kid) {
+          try {
+            // Gunakan jwksClient untuk mendapatkan key dengan kid ini
+            const signingKey = await this.jwksClient.getSigningKey(key.kid);
+            return signingKey.getPublicKey();
+          } catch {
+            continue; // Coba key berikutnya
+          }
+        }
+      }
+
+      return null;
+    } catch {
+      return null;
+    }
+  }
+  /**
+   * Validate JWT token dengan fallback mechanism
+   */
+  async validateToken(
     token: string,
     context: InvocationContext
   ): Promise<TokenValidationResult> {
     try {
-      // Decode token header untuk mendapatkan kid
+      // Decode token untuk mendapatkan kid (optional)
       const decodedHeader = jwt.decode(token, { complete: true });
-      if (!decodedHeader || !decodedHeader.header.kid) {
-        return {
-          isValid: false,
-          error: 'Invalid token: missing key ID (kid) in header',
-        };
-      }
+      const kid = decodedHeader?.header?.kid;
 
-      const kid = decodedHeader.header.kid;
-
-      // Get signing key
-      const signingKey = await this.getSigningKey(kid);
       // JWT verification options
       const verifyOptions: jwt.VerifyOptions = {
         algorithms: ['RS256'],
@@ -180,12 +226,36 @@ class JWTValidationService {
         clockTolerance: 60, // 60 seconds tolerance for clock skew
       };
 
-      // Verify token
-      const decoded = jwt.verify(
-        token,
-        signingKey,
-        verifyOptions
-      ) as B2CTokenClaims;
+      let decoded: B2CTokenClaims | null = null;
+      let lastError: Error | null = null;
+
+      // Coba mendapatkan signing key (dengan atau tanpa kid)
+      try {
+        const signingKey = await this.getSigningKey(kid);
+        decoded = jwt.verify(
+          token,
+          signingKey,
+          verifyOptions
+        ) as B2CTokenClaims;
+        context.info(
+          `Token verified successfully ${
+            kid ? `using kid: ${kid}` : 'with fallback key'
+          }`
+        );
+      } catch (error) {
+        lastError = error as Error;
+        context.error(`Token verification failed: ${lastError.message}`);
+      }
+
+      // Jika tidak berhasil
+      if (!decoded) {
+        const errorMessage = lastError?.message || 'Token validation failed';
+        context.error('Token validation failed with all available methods');
+        return {
+          isValid: false,
+          error: `Token validation failed: ${errorMessage}`,
+        };
+      }
 
       // Additional validation
       const validationResult = this.validateClaims(decoded, context);
@@ -325,30 +395,29 @@ class JWTValidationService {
     const scopes = claims.scp.split(' ');
     return scopes.includes(requiredScope);
   }
-
   /**
    * Get token info untuk debugging
    */
   getTokenInfo(token: string): {
-    header?: any;
-    payload?: any;
+    header?: jwt.JwtHeader;
+    payload?: jwt.JwtPayload;
     isExpired?: boolean;
   } {
     try {
       const decoded = jwt.decode(token, { complete: true });
       if (!decoded) return {};
 
-      const payload = decoded.payload as JwtPayload;
+      const payload = decoded.payload as jwt.JwtPayload;
       const isExpired = payload.exp
         ? payload.exp < Math.floor(Date.now() / 1000)
         : false;
 
       return {
         header: decoded.header,
-        payload: decoded.payload,
+        payload: decoded.payload as jwt.JwtPayload,
         isExpired,
       };
-    } catch (error) {
+    } catch {
       return {};
     }
   }

@@ -16,29 +16,7 @@
  *
  * For licensing inquiries: reihan3000@gmail.com
  */
-/**
- * JWT Token Validation Service for Azure Functions
- *
- * Service untuk validasi JWT token dari Azure Entra External ID (B2C)
- * menggunakan JWKS (JSON Web Key Set) untuk verifikasi signature
- *
- * Features:
- * - JWT token validation dengan signature verification
- * - JWKS caching untuk performance
- * - Token claims extraction dan validation
- * - Audience dan issuer validation
- * - Error handling dan logging
- * - TypeScript type safety
- *
- * Best Practices Applied:
- * - Security validation (signature, expiry, audience)
- * - Performance optimization (JWKS caching)
- * - Comprehensive error handling
- * - Detailed logging untuk debugging
- * - Type safety dengan interfaces
- */
 import jwt from 'jsonwebtoken';
-// Use jwks-rsa instead of jwks-client
 import jwksClient from 'jwks-rsa';
 class JWTValidationService {
     constructor(config) {
@@ -60,44 +38,100 @@ class JWTValidationService {
         });
     }
     /**
-     * Get signing key dari JWKS endpoint
+     * Get signing key dari JWKS endpoint dengan fallback mechanism
      */
     async getSigningKey(kid) {
         try {
-            const key = await this.jwksClient.getSigningKey(kid);
-            return key.getPublicKey();
+            // Jika ada kid, coba gunakan kid tersebut
+            if (kid) {
+                try {
+                    const key = await this.jwksClient.getSigningKey(kid);
+                    return key.getPublicKey();
+                }
+                catch {
+                    console.warn(`Failed to get key with kid ${kid}, trying fallback...`);
+                }
+            }
+            // Fallback: coba tanpa kid - ambil key pertama yang tersedia
+            // Untuk production, kita tidak terlalu bergantung pada kid
+            const fallbackKey = await this.getFallbackSigningKey();
+            if (fallbackKey) {
+                return fallbackKey;
+            }
+            throw new Error('No signing keys available');
         }
         catch (error) {
-            // Log error without exposing sensitive key information
-            throw new Error('Failed to get signing key');
+            throw new Error(`Failed to get signing key: ${error instanceof Error ? error.message : 'Unknown error'}`);
         }
     }
     /**
-     * Validate JWT token
-     */ async validateToken(token, context) {
+     * Get fallback signing key - ambil key pertama yang tersedia
+     */
+    async getFallbackSigningKey() {
         try {
-            // Decode token header untuk mendapatkan kid
-            const decodedHeader = jwt.decode(token, { complete: true });
-            if (!decodedHeader || !decodedHeader.header.kid) {
-                return {
-                    isValid: false,
-                    error: 'Invalid token: missing key ID (kid) in header',
-                };
+            // Fetch JWKS untuk mendapatkan key pertama
+            const jwksResponse = await fetch(`https://${this.config.tenantName}.ciamlogin.com/${this.config.tenantId}/discovery/v2.0/keys`);
+            if (!jwksResponse.ok) {
+                throw new Error(`JWKS fetch failed: ${jwksResponse.status}`);
             }
-            const kid = decodedHeader.header.kid;
-            // Get signing key
-            const signingKey = await this.getSigningKey(kid);
+            const jwks = await jwksResponse.json();
+            // Ambil key pertama yang valid untuk signing
+            for (const key of jwks.keys || []) {
+                if (key.kty === 'RSA' && key.use === 'sig' && key.kid) {
+                    try {
+                        // Gunakan jwksClient untuk mendapatkan key dengan kid ini
+                        const signingKey = await this.jwksClient.getSigningKey(key.kid);
+                        return signingKey.getPublicKey();
+                    }
+                    catch {
+                        continue; // Coba key berikutnya
+                    }
+                }
+            }
+            return null;
+        }
+        catch {
+            return null;
+        }
+    }
+    /**
+     * Validate JWT token dengan fallback mechanism
+     */
+    async validateToken(token, context) {
+        try {
+            // Decode token untuk mendapatkan kid (optional)
+            const decodedHeader = jwt.decode(token, { complete: true });
+            const kid = decodedHeader?.header?.kid;
             // JWT verification options
             const verifyOptions = {
                 algorithms: ['RS256'],
                 audience: this.config.audience || this.config.clientId,
-                // For CIAM tokens, issuer includes the user flow
+                // For CIAM tokens, issuer does not include user flow
                 issuer: this.config.issuer ||
-                    `https://${this.config.tenantName}.ciamlogin.com/${this.config.tenantId}/${this.config.userFlow}/v2.0/`,
+                    `https://${this.config.tenantId}.ciamlogin.com/${this.config.tenantId}/v2.0`,
                 clockTolerance: 60, // 60 seconds tolerance for clock skew
             };
-            // Verify token
-            const decoded = jwt.verify(token, signingKey, verifyOptions);
+            let decoded = null;
+            let lastError = null;
+            // Coba mendapatkan signing key (dengan atau tanpa kid)
+            try {
+                const signingKey = await this.getSigningKey(kid);
+                decoded = jwt.verify(token, signingKey, verifyOptions);
+                context.info(`Token verified successfully ${kid ? `using kid: ${kid}` : 'with fallback key'}`);
+            }
+            catch (error) {
+                lastError = error;
+                context.error(`Token verification failed: ${lastError.message}`);
+            }
+            // Jika tidak berhasil
+            if (!decoded) {
+                const errorMessage = lastError?.message || 'Token validation failed';
+                context.error('Token validation failed with all available methods');
+                return {
+                    isValid: false,
+                    error: `Token validation failed: ${errorMessage}`,
+                };
+            }
             // Additional validation
             const validationResult = this.validateClaims(decoded, context);
             if (!validationResult.isValid) {
@@ -169,11 +203,10 @@ class JWTValidationService {
                 isValid: false,
                 error: 'Token not yet valid',
             };
-        }
-        // Validate issuer format (updated for CIAM with user flow)
-        const expectedIssuerPattern = new RegExp(`https://${this.config.tenantName}\\.ciamlogin\\.com/.*/v2\\.0/`);
-        if (!expectedIssuerPattern.test(claims.iss)) {
-            context.warn(`Invalid token issuer: ${claims.iss}`);
+        } // Validate issuer format (updated for CIAM)
+        const expectedIssuer = `https://${this.config.tenantId}.ciamlogin.com/${this.config.tenantId}/v2.0`;
+        if (claims.iss !== expectedIssuer) {
+            context.warn(`Invalid token issuer: ${claims.iss}, expected: ${expectedIssuer}`);
             return {
                 isValid: false,
                 error: 'Invalid token issuer',
@@ -228,7 +261,7 @@ class JWTValidationService {
                 isExpired,
             };
         }
-        catch (error) {
+        catch {
             return {};
         }
     }
@@ -238,16 +271,18 @@ class JWTValidationService {
  */
 export function createJWTService() {
     const config = {
-        tenantName: process.env['AZURE_TENANT_NAME'] || '',
-        tenantId: process.env['AZURE_TENANT_ID'] || '',
-        clientId: process.env['AZURE_BACKEND_CLIENT_ID'] || '',
+        tenantName: process.env['AZURE_TENANT_NAME'] || 'virpalapp',
+        tenantId: process.env['AZURE_TENANT_ID'] || 'db0374b9-bb6f-4410-ad04-db7fe70f4d7b',
+        clientId: process.env['AZURE_BACKEND_CLIENT_ID'] ||
+            '9ae4699e-0823-453e-b0f7-b614491a80a2',
         userFlow: process.env['AZURE_USER_FLOW'] || '',
-        // Use CIAM endpoints - will be constructed from environment variables
-        jwksUri: `https://${process.env['AZURE_TENANT_NAME'] || 'your-tenant'}.ciamlogin.com/${process.env['AZURE_TENANT_ID'] || 'your-tenant.onmicrosoft.com'}/discovery/v2.0/keys?p=${process.env['AZURE_USER_FLOW'] || 'your-user-flow'}`,
-        // Issuer includes user flow for CIAM tokens
-        issuer: `https://${process.env['AZURE_TENANT_NAME'] || 'your-tenant'}.ciamlogin.com/${process.env['AZURE_TENANT_ID'] || 'your-tenant.onmicrosoft.com'}/${process.env['AZURE_USER_FLOW'] || 'your-user-flow'}/v2.0/`,
-        // For CIAM, audience should be the frontend client ID that requested the token
-        audience: process.env['AZURE_FRONTEND_CLIENT_ID'] || '',
+        // Use CIAM endpoints without user flow (External ID uses different format)
+        jwksUri: `https://${process.env['AZURE_TENANT_NAME'] || 'virpalapp'}.ciamlogin.com/${process.env['AZURE_TENANT_ID'] || 'db0374b9-bb6f-4410-ad04-db7fe70f4d7b'}/discovery/v2.0/keys`,
+        // Issuer for CIAM (External ID) tokens - no user flow
+        issuer: `https://${process.env['AZURE_TENANT_ID'] || 'db0374b9-bb6f-4410-ad04-db7fe70f4d7b'}.ciamlogin.com/${process.env['AZURE_TENANT_ID'] || 'db0374b9-bb6f-4410-ad04-db7fe70f4d7b'}/v2.0`,
+        // For CIAM, audience should be the backend API client ID
+        audience: process.env['AZURE_BACKEND_CLIENT_ID'] ||
+            '9ae4699e-0823-453e-b0f7-b614491a80a2',
     };
     // Validate configuration
     const requiredFields = ['tenantName', 'tenantId', 'clientId'];
