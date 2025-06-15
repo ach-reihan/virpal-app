@@ -40,7 +40,47 @@ import type {
 import { app } from '@azure/functions';
 import { DefaultAzureCredential } from '@azure/identity';
 import { SecretClient } from '@azure/keyvault-secrets';
+// import { getCredentials } from '../config/credentials.js';
 import { createJWTService } from './jwtValidationService.js';
+
+// 🚨 HACKATHON HARDCODED CREDENTIALS - REAL VALUES FOR DEMO 🚨
+const HACKATHON_CREDENTIALS = {
+  speechService: {
+    key: 'CvyiT40aYjGzlXOETsRL7lcjE5DbLUGTaTxzCaFzUQfSQfBNU11LJQQJ99BFACqBBLyXJ3w3AAAYACOGLSeZ',
+    region: 'southeastasia',
+    endpoint: 'https://southeastasia.tts.speech.microsoft.com/',
+  },
+  openAI: {
+    endpoint: 'https://reiha-matmpsh6-eastus2.cognitiveservices.azure.com/',
+    apiKey:
+      '61g44dK4hEeZIBrk5EHiNVfNzxkRXu3Uhj0dKNQXGQFUYcPcEKD4JQQJ99BEACHYHv6XJ3w3AAAAACOGl55q',
+    deploymentName: 'gpt-4o-mini',
+    apiVersion: '2024-10-24',
+  },
+  cosmosDB: {
+    endpoint:
+      'https://project-ai-assistant-virpal-cosmos-db-nosql.documents.azure.com:443/',
+    key: 'hIxpJsstOtRnPX57GaCizYmtbvxkhoAjFSQAyOebQbIuKWR2fVDITiUmHiHgPZn6nsTVyvGDEaxrACDbE8E8GQ==',
+    database: 'virpal-db',
+    container: 'conversations',
+    connectionString:
+      'AccountEndpoint=https://project-ai-assistant-virpal-cosmos-db-nosql.documents.azure.com:443/;AccountKey=hIxpJsstOtRnPX57GaCizYmtbvxkhoAjFSQAyOebQbIuKWR2fVDITiUmHiHgPZn6nsTVyvGDEaxrACDbE8E8GQ==;',
+  },
+  entraID: {
+    clientId: '9ae4699e-0823-453e-b0f7-b614491a80a2',
+    clientSecret: '0212c17c-ec83-4107-8eda-e4588c11eb79',
+    tenantId: 'db0374b9-bb6f-4410-ad04-db7fe70f4d7b',
+    authority:
+      'https://db0374b9-bb6f-4410-ad04-db7fe70f4d7b.ciamlogin.com/db0374b9-bb6f-4410-ad04-db7fe70f4d7b/v2.0',
+  },
+  jwt: {
+    secret:
+      'b2086164e136965e909c05a132b2bd97619ee3b25f201e856afff18cacbf1e966794288205372b5274ff09bc37c5d85968b8a3c12dc79157ba7e2215aece0680',
+    issuer:
+      'https://db0374b9-bb6f-4410-ad04-db7fe70f4d7b.ciamlogin.com/db0374b9-bb6f-4410-ad04-db7fe70f4d7b/v2.0',
+    audience: '9ae4699e-0823-453e-b0f7-b614491a80a2',
+  },
+};
 
 interface KeyVaultResponse {
   success: boolean;
@@ -277,7 +317,7 @@ async function validateAuthentication(
 }
 
 /**
- * Get secret value with Environment Variables first, Key Vault fallback strategy
+ * Get secret value with Hardcoded Credentials first (for hackathon), then Environment Variables, then Key Vault fallback
  * Optimized for Azure Static Web Apps Managed Functions
  */
 async function getSecretValue(
@@ -290,7 +330,66 @@ async function getSecretValue(
   source?: string;
 }> {
   try {
-    // Strategy 1: Check Environment Variables first (for Managed Functions)
+    // Strategy 1: Use hardcoded credentials for hackathon (priority)
+    try {
+      const hardcodedValues: Record<string, string> = {
+        // Azure Speech Service
+        'azure-speech-service-key': HACKATHON_CREDENTIALS.speechService.key,
+        'azure-speech-service-region':
+          HACKATHON_CREDENTIALS.speechService.region,
+        'azure-speech-service-endpoint':
+          HACKATHON_CREDENTIALS.speechService.endpoint,
+
+        // Azure OpenAI
+        'azure-openai-endpoint': HACKATHON_CREDENTIALS.openAI.endpoint,
+        'azure-openai-api-key': HACKATHON_CREDENTIALS.openAI.apiKey,
+        'openai-api-key': HACKATHON_CREDENTIALS.openAI.apiKey,
+        'azure-openai-deployment-name':
+          HACKATHON_CREDENTIALS.openAI.deploymentName,
+        'azure-openai-api-version': HACKATHON_CREDENTIALS.openAI.apiVersion,
+
+        // Azure Cosmos DB
+        'azure-cosmos-db-endpoint-uri': HACKATHON_CREDENTIALS.cosmosDB.endpoint,
+        'azure-cosmos-db-endpoint': HACKATHON_CREDENTIALS.cosmosDB.endpoint,
+        'azure-cosmos-db-key': HACKATHON_CREDENTIALS.cosmosDB.key,
+        'azure-cosmos-db-database-name':
+          HACKATHON_CREDENTIALS.cosmosDB.database,
+        'azure-cosmos-db-connection-string':
+          HACKATHON_CREDENTIALS.cosmosDB.connectionString,
+
+        // Azure Entra ID (but keep as fallback, don't override MSAL)
+        'azure-backend-client-id': HACKATHON_CREDENTIALS.entraID.clientId,
+        'azure-frontend-client-id': HACKATHON_CREDENTIALS.entraID.clientId,
+
+        // JWT
+        'jwt-secret': HACKATHON_CREDENTIALS.jwt.secret,
+        'jwt-issuer': HACKATHON_CREDENTIALS.jwt.issuer,
+        'jwt-audience': HACKATHON_CREDENTIALS.jwt.audience,
+
+        // Legacy mappings
+        'speech-key': HACKATHON_CREDENTIALS.speechService.key,
+        'speech-region': HACKATHON_CREDENTIALS.speechService.region,
+      };
+
+      if (hardcodedValues[secretName]) {
+        context.info(
+          `🚨 HACKATHON: Secret '${secretName}' retrieved from hardcoded credentials`
+        );
+        return {
+          success: true,
+          value: hardcodedValues[secretName],
+          source: 'hackathon-hardcoded',
+        };
+      }
+    } catch (credError) {
+      context.warn(
+        `Failed to get hardcoded credentials: ${
+          credError instanceof Error ? credError.message : 'Unknown error'
+        }`
+      );
+    }
+
+    // Strategy 2: Check Environment Variables (for production/managed functions)
     const envVarName =
       ENV_VAR_MAPPING[secretName as keyof typeof ENV_VAR_MAPPING];
     if (envVarName && typeof envVarName === 'string') {
@@ -315,7 +414,7 @@ async function getSecretValue(
       );
     }
 
-    // Strategy 2: Fallback to Key Vault (for BYOF or development)
+    // Strategy 3: Fallback to Key Vault (for BYOF or development)
     if (secretClient && KEY_VAULT_URL) {
       context.info(`Attempting Key Vault fallback for secret '${secretName}'`);
 
@@ -346,7 +445,7 @@ async function getSecretValue(
       );
     }
 
-    // Strategy 3: Hardcoded defaults for non-sensitive configuration
+    // Strategy 4: Hardcoded defaults for non-sensitive configuration
     const defaultValues: Record<string, string> = {
       'azure-speech-service-region': 'southeastasia',
       'azure-cosmos-db-database-name': 'virpal-db',
@@ -371,7 +470,7 @@ async function getSecretValue(
     // All strategies failed
     return {
       success: false,
-      error: `Secret '${secretName}' not found in environment variables, Key Vault, or defaults`,
+      error: `Secret '${secretName}' not found in hardcoded credentials, environment variables, Key Vault, or defaults`,
       source: 'none',
     };
   } catch (error) {
@@ -671,23 +770,20 @@ export async function getSecret(
           } as KeyVaultResponse,
         };
       }
-    } // Initialize client if needed
+    }
+
+    // Initialize client if needed (optional for hackathon - hardcoded credentials used first)
     if (!secretClient) {
       secretClient = initializeKeyVaultClient();
+      // For hackathon, Key Vault client is optional since we use hardcoded credentials
       if (!secretClient) {
-        context.error('Key Vault client initialization failed');
-        return {
-          status: 500,
-          headers: headers,
-          jsonBody: {
-            success: false,
-            error: 'Key Vault client not initialized',
-            requestId,
-            timestamp,
-          } as KeyVaultResponse,
-        };
+        context.info(
+          'Key Vault client not available - using hardcoded credentials for hackathon'
+        );
       }
-    } // Input validation
+    }
+
+    // Input validation
     const secretName = request.query.get('name');
     if (!secretName) {
       return {

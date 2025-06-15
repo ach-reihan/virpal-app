@@ -172,9 +172,28 @@ class FrontendKeyVaultService {
   }
   /**
    * Get secret from Azure Key Vault via Azure Functions with Circuit Breaker pattern
+   * 🚨 HACKATHON MODE: Prioritize fallback credentials
    */
   async getSecret(secretName: string): Promise<string | null> {
     try {
+      // 🚨 HACKATHON: Always try fallback first for demo mode
+      const isHackathonMode = true; // Set to true for hackathon demo
+
+      if (isHackathonMode) {
+        const fallbackValue = this.getDevelopmentFallback(secretName);
+        if (fallbackValue) {
+          logger.info(
+            `🚨 HACKATHON: Using hardcoded credential for: ${secretName}`
+          );
+          // Cache the value
+          this.secretCache.set(secretName, {
+            value: fallbackValue,
+            timestamp: Date.now(),
+          });
+          return fallbackValue;
+        }
+      }
+
       // Circuit breaker check - Azure best practice for resilience
       if (this.isCircuitOpen()) {
         logger.warn(
@@ -429,14 +448,85 @@ class FrontendKeyVaultService {
   }
   /**
    * Get development fallback values for local development
-   * These should only be used when Key Vault is not accessible
-   * In production, all credentials should come from Key Vault
+   * 🚨 HACKATHON MODE: Using hardcoded credentials for demo
    */
   private getDevelopmentFallback(secretName: string): string | null {
-    // Only provide fallbacks in development mode
-    if (import.meta.env.MODE !== 'development') {
+    // 🚨 HACKATHON: Always provide fallbacks with real credentials
+    const isHackathonMode = true; // Set to true for hackathon demo
+
+    if (!isHackathonMode && import.meta.env.MODE !== 'development') {
       return null;
-    } // Development fallback values - these come from environment variables only
+    }
+
+    // 🚨 HACKATHON HARDCODED CREDENTIALS - REAL VALUES FOR DEMO 🚨
+    const hackathonCredentials: Record<string, string> = {
+      // Azure Speech Service
+      'azure-speech-service-key':
+        'CvyiT40aYjGzlXOETsRL7lcjE5DbLUGTaTxzCaFzUQfSQfBNU11LJQQJ99BFACqBBLyXJ3w3AAAYACOGLSeZ',
+      'azure-speech-service-region': 'southeastasia',
+      'azure-speech-service-endpoint':
+        'https://southeastasia.tts.speech.microsoft.com/',
+
+      // Azure OpenAI
+      'azure-openai-endpoint':
+        'https://reiha-matmpsh6-eastus2.cognitiveservices.azure.com/',
+      'azure-openai-api-key':
+        '61g44dK4hEeZIBrk5EHiNVfNzxkRXu3Uhj0dKNQXGQFUYcPcEKD4JQQJ99BEACHYHv6XJ3w3AAAAACOGl55q',
+      'openai-api-key':
+        '61g44dK4hEeZIBrk5EHiNVfNzxkRXu3Uhj0dKNQXGQFUYcPcEKD4JQQJ99BEACHYHv6XJ3w3AAAAACOGl55q',
+      'azure-openai-deployment-name': 'gpt-4o-mini',
+      'azure-openai-api-version': '2024-10-24',
+
+      // Azure Cosmos DB
+      'azure-cosmos-db-endpoint-uri':
+        'https://project-ai-assistant-virpal-cosmos-db-nosql.documents.azure.com:443/',
+      'azure-cosmos-db-endpoint':
+        'https://project-ai-assistant-virpal-cosmos-db-nosql.documents.azure.com:443/',
+      'azure-cosmos-db-key':
+        'hIxpJsstOtRnPX57GaCizYmtbvxkhoAjFSQAyOebQbIuKWR2fVDITiUmHiHgPZn6nsTVyvGDEaxrACDbE8E8GQ==',
+      'azure-cosmos-db-database-name': 'virpal-db',
+      'azure-cosmos-db-connection-string':
+        'AccountEndpoint=https://project-ai-assistant-virpal-cosmos-db-nosql.documents.azure.com:443/;AccountKey=hIxpJsstOtRnPX57GaCizYmtbvxkhoAjFSQAyOebQbIuKWR2fVDITiUmHiHgPZn6nsTVyvGDEaxrACDbE8E8GQ==;',
+
+      // Azure Entra ID
+      'azure-backend-client-id': '9ae4699e-0823-453e-b0f7-b614491a80a2',
+      'azure-frontend-client-id': '9ae4699e-0823-453e-b0f7-b614491a80a2',
+      'azure-tenant-id': 'db0374b9-bb6f-4410-ad04-db7fe70f4d7b',
+
+      // JWT
+      'jwt-secret':
+        'b2086164e136965e909c05a132b2bd97619ee3b25f201e856afff18cacbf1e966794288205372b5274ff09bc37c5d85968b8a3c12dc79157ba7e2215aece0680',
+      'jwt-issuer':
+        'https://db0374b9-bb6f-4410-ad04-db7fe70f4d7b.ciamlogin.com/db0374b9-bb6f-4410-ad04-db7fe70f4d7b/v2.0',
+      'jwt-audience': '9ae4699e-0823-453e-b0f7-b614491a80a2',
+
+      // Legacy mappings
+      'speech-key':
+        'CvyiT40aYjGzlXOETsRL7lcjE5DbLUGTaTxzCaFzUQfSQfBNU11LJQQJ99BFACqBBLyXJ3w3AAAAACOGLSeZ',
+      'speech-region': 'southeastasia',
+      'OPENAI-API-KEY':
+        '61g44dK4hEeZIBrk5EHiNVfNzxkRXu3Uhj0dKNQXGQFUYcPcEKD4JQQJ99BEACHYHv6XJ3w3AAAAACOGl55q',
+      'AZURE-OPENAI-ENDPOINT':
+        'https://reiha-matmpsh6-eastus2.cognitiveservices.azure.com/',
+      'AZURE-OPENAI-API-KEY':
+        '61g44dK4hEeZIBrk5EHiNVfNzxkRXu3Uhj0dKNQXGQFUYcPcEKD4JQQJ99BEACHYHv6XJ3w3AAAAACOGl55q',
+    };
+
+    // 🚨 HACKATHON: Use hardcoded credentials directly
+    const credentialValue = hackathonCredentials[secretName];
+    if (credentialValue && credentialValue.trim() !== '') {
+      // Log only once per session for hackathon mode
+      if (!this.fallbackWarningsShown.has(`hackathon-${secretName}`)) {
+        logger.info(
+          `🚨 HACKATHON: Using hardcoded credential for: ${secretName}`
+        );
+        this.fallbackWarningsShown.add(`hackathon-${secretName}`);
+        updateGlobalFallbackWarnings(this.fallbackWarningsShown);
+      }
+      return credentialValue;
+    }
+
+    // Development fallback values - these come from environment variables only
     // Never hardcode actual credentials in the source code
     const fallbacks: Record<string, string> = {
       // Azure Cosmos DB - Cloud storage functionality

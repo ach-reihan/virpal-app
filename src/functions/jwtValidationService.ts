@@ -46,6 +46,7 @@ import type { JwtPayload } from 'jsonwebtoken';
 import jwt from 'jsonwebtoken';
 // Use jwks-rsa instead of jwks-client
 import jwksClient from 'jwks-rsa';
+import { getEntraIDConfig, getJWTConfig } from './credentialHelper.js';
 
 /**
  * JWKS (JSON Web Key Set) Response Interface
@@ -706,62 +707,41 @@ class JWTValidationService {
 }
 
 /**
- * Create JWT validation service dengan configuration dari environment variables
+ * Create JWT validation service dengan configuration dari credential helper
  */
 export function createJWTService(): JWTValidationService {
-  // Retrieve required environment variables - no fallback values for security
-  const tenantName = process.env['AZURE_TENANT_NAME'];
-  const tenantId = process.env['AZURE_TENANT_ID'];
-  const backendClientId = process.env['AZURE_BACKEND_CLIENT_ID'];
-  const userFlow = process.env['AZURE_USER_FLOW'] || '';
+  try {
+    // Get configuration from credential helper
+    const jwtConfig = getJWTConfig();
+    const entraConfig = getEntraIDConfig();
 
-  // Validate that all required environment variables are present
-  const missingVars: string[] = [];
-  if (!tenantName) missingVars.push('AZURE_TENANT_NAME');
-  if (!tenantId) missingVars.push('AZURE_TENANT_ID');
-  if (!backendClientId) missingVars.push('AZURE_BACKEND_CLIENT_ID');
+    // Extract tenant name from tenant ID for JWKS URI
+    const tenantName = entraConfig.tenantId;
+    const config: JWTServiceConfig = {
+      tenantName: tenantName,
+      tenantId: entraConfig.tenantId,
+      clientId: entraConfig.clientId,
+      userFlow: '',
+      // Use CIAM endpoints for External ID
+      jwksUri: `https://${tenantName}.ciamlogin.com/${tenantName}/discovery/v2.0/keys`,
+      issuer: jwtConfig.issuer,
+      audience: jwtConfig.audience,
+    };
 
-  if (missingVars.length > 0) {
-    const errorMessage =
-      `Missing required environment variables for JWT authentication: ${missingVars.join(
-        ', '
-      )}. ` +
-      'Please ensure these variables are set in your environment or .env file. ' +
-      'See .env.example for configuration template.';
-
-    console.error('JWT Service Configuration Error:', {
-      missingVariables: missingVars,
-      availableEnvVars: {
-        AZURE_TENANT_NAME: !!process.env['AZURE_TENANT_NAME'],
-        AZURE_TENANT_ID: !!process.env['AZURE_TENANT_ID'],
-        AZURE_BACKEND_CLIENT_ID: !!process.env['AZURE_BACKEND_CLIENT_ID'],
-        AZURE_USER_FLOW: !!process.env['AZURE_USER_FLOW'],
-      },
+    console.info('JWT Service initialized with hackathon credentials', {
+      tenantName: tenantName.substring(0, 3) + '***', // Partial logging for security
+      tenantId: entraConfig.tenantId.substring(0, 8) + '***',
+      clientId: entraConfig.clientId.substring(0, 8) + '***',
+      mode: 'hackathon',
     });
 
-    throw new Error(errorMessage);
+    return new JWTValidationService(config);
+  } catch (error) {
+    const errorMessage =
+      error instanceof Error ? error.message : 'Unknown error';
+    console.error('JWT Service Configuration Error:', errorMessage);
+    throw new Error(`Failed to initialize JWT service: ${errorMessage}`);
   }
-  const config: JWTServiceConfig = {
-    tenantName: tenantName!,
-    tenantId: tenantId!,
-    clientId: backendClientId!,
-    userFlow,
-    // Use CIAM endpoints without user flow (External ID uses different format)
-    jwksUri: `https://${tenantName}.ciamlogin.com/${tenantId}/discovery/v2.0/keys`,
-    // Issuer for CIAM (External ID) tokens - no user flow
-    issuer: `https://${tenantId}.ciamlogin.com/${tenantId}/v2.0`,
-    // For CIAM, audience should be the backend API client ID
-    audience: backendClientId!,
-  };
-
-  console.info('JWT Service initialized with environment variables', {
-    tenantName: tenantName!.substring(0, 3) + '***', // Partial logging for security
-    tenantId: tenantId!.substring(0, 8) + '***',
-    clientId: backendClientId!.substring(0, 8) + '***',
-    hasUserFlow: !!userFlow,
-  });
-
-  return new JWTValidationService(config);
 }
 
 export { JWTValidationService };

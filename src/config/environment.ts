@@ -4,14 +4,22 @@
  *
  * Centralized environment detection dan endpoint configuration
  * untuk mengatasi CORS issues di Azure Static Web Apps
+ * Updated for hackathon with hardcoded credentials support
  */
+
+import {
+  getEnvironmentCredentials,
+  type AzureCredentials,
+} from './credentials';
 
 export interface EnvironmentConfig {
   isProduction: boolean;
   isAzureStaticWebApp: boolean;
   isDevelopment: boolean;
+  isHackathonMode: boolean;
   functionBaseUrl: string;
   apiEndpoint: string;
+  credentials: AzureCredentials;
 }
 
 /**
@@ -20,6 +28,7 @@ export interface EnvironmentConfig {
 export const getEnvironmentConfig = (): EnvironmentConfig => {
   const isProduction = import.meta.env.PROD;
   const isDevelopment = import.meta.env.DEV;
+  const isHackathonMode = true; // Set to false after hackathon
 
   // Deteksi Azure Static Web Apps
   let isAzureStaticWebApp = false;
@@ -47,13 +56,17 @@ export const getEnvironmentConfig = (): EnvironmentConfig => {
     functionBaseUrl = 'http://localhost:7071';
     apiEndpoint = 'http://localhost:7071/api';
   }
+  // Load credentials for hackathon mode
+  const credentials = getEnvironmentCredentials();
 
   return {
     isProduction,
-    isAzureStaticWebApp,
     isDevelopment,
+    isAzureStaticWebApp,
+    isHackathonMode,
     functionBaseUrl,
     apiEndpoint,
+    credentials,
   };
 };
 

@@ -47,6 +47,8 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "lighthouse": "npm run build:frontend && npx lhci autorun",
+    "generate:jwt": "node scripts/generate-jwt-secret.js",
+    "hackathon:setup": "node scripts/generate-jwt-secret.js",
     "deploy:validate": "pwsh scripts/deploy-virpal.ps1 -Environment local -DeploymentType validate-only",
     "deploy:staging": "pwsh scripts/deploy-virpal.ps1 -Environment staging -DeploymentType full-deploy",
     "deploy:production": "pwsh scripts/deploy-virpal.ps1 -Environment production -DeploymentType full-deploy -ProductionDomain https://virpal.azurewebsites.net",

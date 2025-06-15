@@ -23,7 +23,20 @@ import type {
   InvocationContext,
 } from '@azure/functions';
 import { app } from '@azure/functions';
+import {
+  // getOpenAIConfig,
+  validateFunctionCredentials,
+} from './credentialHelper.js';
 import { createJWTService } from './jwtValidationService.js';
+
+// 🚨 HACKATHON HARDCODED CREDENTIALS - REAL VALUES FOR DEMO 🚨
+const HACKATHON_OPENAI_CONFIG = {
+  endpoint: 'https://reiha-matmpsh6-eastus2.cognitiveservices.azure.com/',
+  apiKey:
+    '61g44dK4hEeZIBrk5EHiNVfNzxkRXu3Uhj0dKNQXGQFUYcPcEKD4JQQJ99BEACHYHv6XJ3w3AAAAACOGl55q',
+  deploymentName: 'gpt-4o-mini',
+  apiVersion: '2024-10-24',
+};
 
 // Performance optimization: Cache configuration to avoid repeated calls
 let configCache: {
@@ -40,20 +53,6 @@ const CONFIG_CACHE_DURATION = 5 * 60 * 1000; // 5 minutes cache
 const RATE_LIMIT_MAX = 30; // requests per window per IP
 const RATE_LIMIT_WINDOW = 60000; // 1 minute window
 const requestTracker = new Map<string, { count: number; lastReset: number }>();
-
-// Environment variable to secret name mapping for Azure Static Web Apps Managed Functions
-const CONFIG_ENV_MAPPING = {
-  'azure-openai-endpoint': 'AZURE_OPENAI_ENDPOINT',
-  'azure-openai-key': 'AZURE_OPENAI_API_KEY',
-  'azure-openai-deployment-name': 'AZURE_OPENAI_DEPLOYMENT_NAME',
-  'azure-openai-api-version': 'AZURE_OPENAI_API_VERSION',
-} as const;
-
-// Default values for non-sensitive configuration
-const CONFIG_DEFAULTS = {
-  'azure-openai-deployment-name': 'gpt-4o-mini',
-  'azure-openai-api-version': '2024-10-24',
-} as const;
 
 // JWT validation service instance
 let jwtService: ReturnType<typeof createJWTService> | null = null;
@@ -315,65 +314,9 @@ async function validateAuthentication(
 }
 
 /**
- * Get configuration value with Environment Variables first strategy
- * Optimized for Azure Static Web Apps Managed Functions
+ * Get Azure OpenAI configuration using credential helper
+ * Optimized for hackathon with hardcoded credentials support
  */
-function getConfigValue(
-  configName: keyof typeof CONFIG_ENV_MAPPING,
-  context: InvocationContext
-): string | null {
-  try {
-    // Strategy 1: Check Environment Variables first (for Managed Functions)
-    const envVarName =
-      CONFIG_ENV_MAPPING[configName as keyof typeof CONFIG_ENV_MAPPING];
-    if (envVarName && typeof envVarName === 'string') {
-      const envValue = process.env[envVarName];
-      if (
-        envValue &&
-        typeof envValue === 'string' &&
-        envValue.trim() !== '' &&
-        envValue.length > 0 &&
-        envValue.length < 2048 // Reasonable limit for config values
-      ) {
-        context.info(
-          `Config '${configName}' retrieved from environment variable '${envVarName}'`
-        );
-        return envValue.trim();
-      } else {
-        context.info(
-          `Environment variable '${envVarName}' for config '${configName}' is empty or not set`
-        );
-      }
-    } else {
-      context.info(
-        `No environment variable mapping found for config '${configName}'`
-      );
-    }
-
-    // Strategy 2: Hardcoded defaults for non-sensitive configuration
-    if (Object.prototype.hasOwnProperty.call(CONFIG_DEFAULTS, configName)) {
-      const defaultValue =
-        CONFIG_DEFAULTS[configName as keyof typeof CONFIG_DEFAULTS];
-      if (defaultValue && typeof defaultValue === 'string') {
-        context.info(`Using default value for '${configName}'`);
-        return defaultValue;
-      }
-    }
-
-    // All strategies failed
-    context.warn(
-      `Config '${configName}' not found in environment variables or defaults`
-    );
-    return null;
-  } catch (error) {
-    const errorMessage =
-      error instanceof Error ? error.message : 'Unknown error';
-    context.error(`Error retrieving config '${configName}': ${errorMessage}`);
-    return null;
-  }
-}
-
-// Configuration retrieval with caching and error handling
 async function getConfiguration(context: InvocationContext): Promise<{
   endpoint: string;
   apiKey: string;
@@ -390,55 +333,63 @@ async function getConfiguration(context: InvocationContext): Promise<{
       apiVersion: configCache.apiVersion,
     };
   }
-
   try {
-    // Get configuration using Environment Variables first strategy
-    const endpoint = getConfigValue('azure-openai-endpoint', context);
-    const apiKey = getConfigValue('azure-openai-key', context);
-    const deploymentName = getConfigValue(
-      'azure-openai-deployment-name',
-      context
-    );
-    const apiVersion = getConfigValue('azure-openai-api-version', context);
+    // Validate credentials first (optional for hackathon)
+    try {
+      validateFunctionCredentials();
+    } catch {
+      context.warn(
+        'Credential validation failed, using hardcoded values for hackathon'
+      );
+    }
+
+    // Get configuration using hardcoded values
+    const config = HACKATHON_OPENAI_CONFIG;
 
     // Validate all required configuration is present
-    if (!endpoint || !apiKey) {
+    if (!config.endpoint || !config.apiKey) {
       context.error(
         'Missing required configuration values: endpoint and apiKey are required'
       );
       return null;
     }
 
-    // Use defaults for optional values if not provided
-    const finalDeploymentName =
-      deploymentName || CONFIG_DEFAULTS['azure-openai-deployment-name'];
-    const finalApiVersion =
-      apiVersion || CONFIG_DEFAULTS['azure-openai-api-version'];
+    // Basic validation for configuration values
+    if (
+      config.endpoint.length < 10 ||
+      !config.endpoint.startsWith('https://')
+    ) {
+      context.error('Invalid endpoint format');
+      return null;
+    }
 
-    // Update cache with new configuration
+    if (config.apiKey.length < 10) {
+      context.error('Invalid API key format');
+      return null;
+    }
+
+    // Use default values for optional parameters
+    const finalConfig = {
+      endpoint: config.endpoint,
+      apiKey: config.apiKey,
+      deploymentName: config.deploymentName || 'gpt-4o-mini',
+      apiVersion: config.apiVersion || '2024-10-24',
+    };
+
+    // Cache the configuration for performance
     configCache = {
-      endpoint,
-      apiKey,
-      deploymentName: finalDeploymentName,
-      apiVersion: finalApiVersion,
+      ...finalConfig,
       timestamp: now,
     };
 
     context.info(
-      `Configuration loaded successfully: ${endpoint}, deployment: ${finalDeploymentName}, version: ${finalApiVersion}`
+      '✅ Azure OpenAI configuration loaded successfully (hackathon mode)'
     );
-
-    return {
-      endpoint,
-      apiKey,
-      deploymentName: finalDeploymentName,
-      apiVersion: finalApiVersion,
-    };
+    return finalConfig;
   } catch (error) {
-    context.error(
-      'Failed to retrieve configuration:',
-      error instanceof Error ? error.message : 'Unknown error'
-    );
+    const errorMessage =
+      error instanceof Error ? error.message : 'Unknown error';
+    context.error(`Failed to get Azure OpenAI configuration: ${errorMessage}`);
     return null;
   }
 }

@@ -6,7 +6,7 @@ metadata:
 
 services:
   virpal-api:
-    project: ./api
+    project: ./dist
     host: function
     language: ts
 
