@@ -30,6 +30,8 @@
  * - Audience dan issuer validation
  * - Error handling dan logging
  * - TypeScript type safety
+ * - Flexible key ID handling (supports tokens with or without kid)
+ * - Multiple signing key fallback when kid is missing
  *
  * Best Practices Applied:
  * - Security validation (signature, expiry, audience)
@@ -37,12 +39,33 @@
  * - Comprehensive error handling
  * - Detailed logging untuk debugging
  * - Type safety dengan interfaces
+ * - Graceful fallback for tokens without key ID
  */
 
 import type { JwtPayload } from 'jsonwebtoken';
 import jwt from 'jsonwebtoken';
 // Use jwks-rsa instead of jwks-client
 import jwksClient from 'jwks-rsa';
+
+/**
+ * JWKS (JSON Web Key Set) Response Interface
+ */
+interface JWKSResponse {
+  keys: JWKSKey[];
+}
+
+/**
+ * Individual JWK (JSON Web Key) Interface
+ */
+interface JWKSKey {
+  kty: string; // Key type (e.g., 'RSA')
+  use?: string; // Key use (e.g., 'sig' for signature)
+  kid?: string; // Key ID
+  x5c?: string[]; // X.509 certificate chain
+  n?: string; // RSA modulus
+  e?: string; // RSA exponent
+  alg?: string; // Algorithm
+}
 
 /**
  * JWT Claims Interface untuk Azure B2C
@@ -137,13 +160,99 @@ class JWTValidationService {
   }
   /**
    * Get signing key dari JWKS endpoint
+   * Supports both kid-based key retrieval and fallback to all available keys
    */
-  private async getSigningKey(kid: string): Promise<string> {
+  private async getSigningKey(kid?: string): Promise<string> {
     try {
-      const key = await this.jwksClient.getSigningKey(kid);
-      return key.getPublicKey();
+      // If kid is provided, try to get the specific key
+      if (kid && typeof kid === 'string' && kid.trim() !== '') {
+        const key = await this.jwksClient.getSigningKey(kid);
+        return key.getPublicKey();
+      }
+
+      // Fallback: Try to get the first available signing key
+      // This is useful when token doesn't have kid or kid is invalid
+      const isDevelopment = process.env['NODE_ENV'] === 'development';
+      if (isDevelopment) {
+        console.warn(
+          'No valid kid provided, attempting to retrieve first available signing key'
+        );
+      }
+
+      // Create a direct JWKS request to get all keys
+      const jwksUri = `https://${this.config.tenantName}.ciamlogin.com/${this.config.tenantName}.onmicrosoft.com/${this.config.userFlow}/discovery/v2.0/keys`;
+
+      try {
+        const response = await fetch(jwksUri);
+        if (!response.ok) {
+          throw new Error(`JWKS endpoint returned ${response.status}`);
+        }
+        const jwks = (await response.json()) as JWKSResponse;
+        if (!jwks.keys || !Array.isArray(jwks.keys) || jwks.keys.length === 0) {
+          throw new Error('No keys found in JWKS response');
+        }
+
+        // Try each key until one works (for tokens without kid)
+        for (const key of jwks.keys) {
+          if (key.kty === 'RSA' && key.use === 'sig' && key.x5c && key.x5c[0]) {
+            // Convert x5c certificate to PEM format
+            const cert = `-----BEGIN CERTIFICATE-----\n${key.x5c[0]}\n-----END CERTIFICATE-----`;
+            if (isDevelopment) {
+              console.info(
+                `Using signing key with kid: ${key.kid || 'unknown'}`
+              );
+            }
+            return cert;
+          }
+        }
+
+        throw new Error('No suitable signing key found in JWKS response');
+      } catch {
+        // Try alternative JWKS URI format
+        const alternativeJwksUri = `https://${this.config.tenantId}.ciamlogin.com/${this.config.tenantId}/discovery/v2.0/keys`;
+        if (isDevelopment) {
+          console.warn(
+            'Primary JWKS failed, trying alternative URI:',
+            alternativeJwksUri
+          );
+        }
+
+        const alternativeResponse = await fetch(alternativeJwksUri);
+        if (!alternativeResponse.ok) {
+          throw new Error(
+            `Alternative JWKS endpoint returned ${alternativeResponse.status}`
+          );
+        }
+        const alternativeJwks =
+          (await alternativeResponse.json()) as JWKSResponse;
+        if (
+          !alternativeJwks.keys ||
+          !Array.isArray(alternativeJwks.keys) ||
+          alternativeJwks.keys.length === 0
+        ) {
+          throw new Error('No keys found in alternative JWKS response');
+        }
+
+        // Try each key from alternative endpoint
+        for (const key of alternativeJwks.keys) {
+          if (key.kty === 'RSA' && key.use === 'sig' && key.x5c && key.x5c[0]) {
+            const cert = `-----BEGIN CERTIFICATE-----\n${key.x5c[0]}\n-----END CERTIFICATE-----`;
+            if (isDevelopment) {
+              console.info(
+                `Using alternative signing key with kid: ${
+                  key.kid || 'unknown'
+                }`
+              );
+            }
+            return cert;
+          }
+        }
+
+        throw new Error(
+          'No suitable signing key found in alternative JWKS response'
+        );
+      }
     } catch (error) {
-      // Enhanced error handling with more context (only in development)
       const isDevelopment = process.env['NODE_ENV'] === 'development';
       if (isDevelopment) {
         console.error('JWKS signing key error details:', {
@@ -153,45 +262,20 @@ class JWTValidationService {
         });
       }
 
-      // Try alternative JWKS URI format if the first one fails
-      if (
-        error instanceof Error &&
-        error.message.includes('Unable to find a signing key')
-      ) {
-        if (isDevelopment) {
-          console.warn('Retrying with alternative JWKS URI format...');
-        }
-
-        // Create a new client with alternative URI format
-        const alternativeJwksUri = `https://${this.config.tenantId}.ciamlogin.com/${this.config.tenantId}/discovery/v2.0/keys`;
-        const alternativeClient = jwksClient({
-          jwksUri: alternativeJwksUri,
-          requestHeaders: {},
-          timeout: 30000,
-          cache: true,
-          cacheMaxEntries: 5,
-          cacheMaxAge: this.CACHE_DURATION,
-          rateLimit: true,
-          jwksRequestsPerMinute: 5,
-        });
-
-        try {
-          const alternativeKey = await alternativeClient.getSigningKey(kid);
-          console.info('Successfully retrieved key with alternative URI');
-          return alternativeKey.getPublicKey();
-        } catch (alternativeError) {
-          console.error('Alternative JWKS URI also failed:', alternativeError);
-        }
-      }
-
       throw new Error(
-        `Failed to get signing key for kid: ${kid}. Please check JWKS endpoint configuration.`
+        `Failed to get signing key${
+          kid ? ` for kid: ${kid}` : ' (no kid specified)'
+        }. Please check JWKS endpoint configuration. Error: ${
+          error instanceof Error ? error.message : 'Unknown error'
+        }`
       );
     }
   }
   /**
    * Validate JWT token
-   */ async validateToken(token: string): Promise<TokenValidationResult> {
+   * Now supports tokens with or without kid in header
+   */
+  async validateToken(token: string): Promise<TokenValidationResult> {
     try {
       // Step 1: Decode token header to get kid without verification
       const decodedToken = jwt.decode(token, { complete: true });
@@ -201,7 +285,9 @@ class JWTValidationService {
           isValid: false,
           error: 'Invalid JWT format - failed to decode token',
         };
-      } // Extract kid from header with enhanced validation
+      }
+
+      // Extract kid from header (optional now)
       const header = decodedToken.header;
       console.debug('JWT token header analysis:', {
         headerExists: !!header,
@@ -229,36 +315,34 @@ class JWTValidationService {
           isValid: false,
           error: 'Invalid token: missing algorithm (alg) in header',
         };
-      } // Extract and validate kid
+      }
+
+      // Extract kid (now optional)
       const kid = header.kid;
-      if (!kid || typeof kid !== 'string' || kid.trim() === '') {
-        const isDevelopment = process.env['NODE_ENV'] === 'development';
-        if (isDevelopment) {
+      const isDevelopment = process.env['NODE_ENV'] === 'development';
+
+      if (isDevelopment) {
+        if (!kid || typeof kid !== 'string' || kid.trim() === '') {
           console.warn(
-            'JWT token missing or invalid kid in header. Full header:',
+            'JWT token missing or invalid kid in header. Will attempt validation without kid. Full header:',
             header
           );
+        } else {
+          console.debug('JWT validation started with kid', {
+            kid,
+            algorithm: decodedToken.header?.alg,
+            tokenType: decodedToken.header?.typ,
+          });
         }
-        return {
-          isValid: false,
-          error:
-            'Invalid token: missing or invalid key ID (kid) in header. Token may be malformed or from wrong issuer.',
-        };
       }
 
-      const isDevelopment = process.env['NODE_ENV'] === 'development';
-      if (isDevelopment) {
-        console.debug('JWT validation started', {
-          kid,
-          algorithm: decodedToken.header?.alg,
-          tokenType: decodedToken.header?.typ,
-        });
-      }
-
-      // Step 2: Get signing key with enhanced error handling
+      // Step 2: Get signing key (now supports fallback without kid)
       let signingKey: string;
       try {
-        signingKey = await this.getSigningKey(kid);
+        // Try with kid first if available, fallback to any available key
+        signingKey = await this.getSigningKey(
+          kid && typeof kid === 'string' && kid.trim() !== '' ? kid : undefined
+        );
       } catch (keyError) {
         console.error('Failed to retrieve signing key:', keyError);
         return {
@@ -288,10 +372,8 @@ class JWTValidationService {
         audience: verifyOptions.audience,
         issuer: verifyOptions.issuer,
         clockTolerance: verifyOptions.clockTolerance,
-      });
-
-      // Step 4: Verify token with detailed error handling
-      let decoded: B2CTokenClaims;
+      }); // Step 4: Verify token with detailed error handling and fallback support
+      let decoded: B2CTokenClaims | undefined;
       try {
         decoded = jwt.verify(
           token,
@@ -300,7 +382,7 @@ class JWTValidationService {
         ) as B2CTokenClaims;
         console.debug('JWT signature verification successful');
       } catch (verificationError) {
-        console.error('JWT verification failed:', {
+        console.error('JWT verification failed with primary key:', {
           error:
             verificationError instanceof Error
               ? verificationError.message
@@ -311,23 +393,97 @@ class JWTValidationService {
               : 'Unknown',
         });
 
-        // Return specific error messages based on verification failure type
-        if (verificationError instanceof jwt.TokenExpiredError) {
-          return { isValid: false, error: 'Token has expired' };
-        } else if (verificationError instanceof jwt.JsonWebTokenError) {
-          return { isValid: false, error: 'Invalid token format or signature' };
-        } else if (verificationError instanceof jwt.NotBeforeError) {
-          return { isValid: false, error: 'Token not active yet' };
-        } else {
-          return {
-            isValid: false,
-            error: `Token verification failed: ${
-              verificationError instanceof Error
-                ? verificationError.message
-                : 'Unknown error'
-            }`,
-          };
+        // If no kid was provided and verification failed, try all available keys
+        if (!kid || typeof kid !== 'string' || kid.trim() === '') {
+          if (isDevelopment) {
+            console.warn(
+              'Primary key failed and no kid available, attempting multiple key validation...'
+            );
+          }
+
+          try {
+            // Try to get all available keys and test each one
+            const jwksUri = `https://${this.config.tenantName}.ciamlogin.com/${this.config.tenantName}.onmicrosoft.com/${this.config.userFlow}/discovery/v2.0/keys`;
+            const response = await fetch(jwksUri);
+            if (response.ok) {
+              const jwks = (await response.json()) as JWKSResponse;
+              if (jwks.keys && Array.isArray(jwks.keys)) {
+                for (const key of jwks.keys) {
+                  if (
+                    key.kty === 'RSA' &&
+                    key.use === 'sig' &&
+                    key.x5c &&
+                    key.x5c[0]
+                  ) {
+                    try {
+                      const cert = `-----BEGIN CERTIFICATE-----\n${key.x5c[0]}\n-----END CERTIFICATE-----`;
+                      decoded = jwt.verify(
+                        token,
+                        cert,
+                        verifyOptions
+                      ) as B2CTokenClaims;
+                      if (isDevelopment) {
+                        console.info(
+                          `Successfully verified token with key kid: ${
+                            key.kid || 'unknown'
+                          }`
+                        );
+                      }
+                      break; // Success, exit the loop
+                    } catch (keyVerificationError) {
+                      // Continue to next key
+                      if (isDevelopment) {
+                        console.debug(
+                          `Key ${key.kid || 'unknown'} failed verification:`,
+                          keyVerificationError instanceof Error
+                            ? keyVerificationError.message
+                            : 'Unknown error'
+                        );
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          } catch (multiKeyError) {
+            if (isDevelopment) {
+              console.error('Multiple key validation failed:', multiKeyError);
+            }
+          }
         }
+
+        // If we still don't have a decoded token, return the original error
+        if (!decoded) {
+          // Return specific error messages based on verification failure type
+          if (verificationError instanceof jwt.TokenExpiredError) {
+            return { isValid: false, error: 'Token has expired' };
+          } else if (verificationError instanceof jwt.JsonWebTokenError) {
+            return {
+              isValid: false,
+              error: 'Invalid token format or signature',
+            };
+          } else if (verificationError instanceof jwt.NotBeforeError) {
+            return { isValid: false, error: 'Token not active yet' };
+          } else {
+            return {
+              isValid: false,
+              error: `Token verification failed: ${
+                verificationError instanceof Error
+                  ? verificationError.message
+                  : 'Unknown error'
+              }`,
+            };
+          }
+        }
+      }
+
+      // If we still don't have a decoded token, return error
+      if (!decoded) {
+        return {
+          isValid: false,
+          error:
+            'Token verification failed: Unable to verify signature with any available key',
+        };
       }
 
       // Step 5: Additional validation
