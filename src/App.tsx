@@ -38,6 +38,7 @@ import { useAuth } from './hooks/useAuth';
 import { useToast } from './hooks/useToast';
 import { useTTSChat } from './hooks/useTTSChat';
 import { authService } from './services/authService';
+import { azureCosmosDbService } from './services/azureCosmosDbService';
 import { guestLimitService } from './services/guestLimitService';
 import { hybridChatStorageService } from './services/hybridChatStorageService';
 import type {
@@ -99,27 +100,30 @@ function AppContent() {
   } = useAuth({
     onAuthStateChange: async (isAuth, userProfile) => {
       if (isAuth && userProfile) {
-        // // Update cloud sync status for authenticated users
-        // setCloudSyncStatus('checking');
-        // try {
-        //   const healthStatus = await hybridChatStorageService.getHealthStatus();
-        //   if (healthStatus.cosmosDbWorking) {
-        //     setCloudSyncStatus('available');
-        //     logger.info('Cloud sync enabled for authenticated user');
-        //   } else {
-        //     setCloudSyncStatus('unavailable');
-        //     logger.info('Cloud sync unavailable for authenticated user');
-        //   }
-        // } catch (error) {
-        //   logger.warn('Failed to check cloud sync status', error);
-        // }
+        // Update cloud sync status for authenticated users
+        setCloudSyncStatus('checking');
+
+        logger.info('🔄 User authenticated, initializing Azure services');
+
+        // Reinitialize Azure services after authentication
+        try {
+          // Reinitialize Cosmos DB Service (TTS is handled by useTTSChat hook)
+          await azureCosmosDbService.initialize();
+          logger.info('✅ Azure Cosmos DB Service reinitialized after login');
+
+          setCloudSyncStatus('available');
+          logger.info('✅ Cloud sync enabled for authenticated user');
+        } catch (error) {
+          logger.warn('❌ Failed to initialize Cosmos DB after login', error);
+          setCloudSyncStatus('unavailable');
+        }
 
         // Optionally add a welcome message without personal information
         setMessages((prev) => [
           ...prev.slice(0, 1), // Keep welcome message
           {
             id: Date.now().toString(),
-            text: `Halo! 👋 Senang bisa membantu kamu hari ini.`,
+            text: `Halo! 👋 Senang bisa membantu kamu hari ini. Azure AI Speech dan cloud sync sedang diaktifkan...`,
             sender: 'virpal',
             timestamp: new Date(),
           },
@@ -219,6 +223,9 @@ function AppContent() {
         // Wait for MSAL initialization before proceeding
         await authService.waitForInitialization();
 
+        // Initialize basic services first (TTS is handled by useTTSChat hook)
+        await azureCosmosDbService.initialize();
+
         // Initialize hybrid storage service
         await hybridChatStorageService.initialize();
 
@@ -286,7 +293,14 @@ function AppContent() {
       document.removeEventListener('click', handleFirstInteraction);
       document.removeEventListener('keydown', handleFirstInteraction);
     };
-  }, []); // Remove tts dependency to prevent infinite loop
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Empty dependency to run only once - tts reference should not cause re-runs
+
+  // Monitor authentication state changes for service initialization
+  useEffect(() => {
+    // This useEffect is now simplified and only monitors authentication state
+    // Service initialization is handled directly in the onAuthStateChange callback
+  }, [isAuthenticated]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -722,41 +736,38 @@ function AppContent() {
               </div>
             </div>
 
-            {/* Controls Section - Shows second on mobile (≤512px), inline on desktop */}
-            <div className="w-full sm:w-auto order-2 sm:order-none flex justify-center sm:justify-end">
-              <div className="flex items-center gap-2 sm:gap-2 md:gap-3">
-                {/* TTS Controls - always show but restrict for guests */}
-                <TTSControls
-                  isInitialized={tts.isInitialized}
-                  isEnabled={tts.isEnabled}
-                  isSpeaking={tts.isSpeaking}
-                  initializationError={tts.initializationError}
-                  onToggleTTS={tts.toggleTTS}
-                  onStopSpeaking={tts.stopSpeaking}
-                  onInitialize={handleTTSInitialize}
-                  isAuthenticated={isAuthenticated}
-                  onLoginClick={handleLogin}
-                />
+            <div className="flex items-center space-x-4">
+              {/* TTS Controls - always show but restrict for guests */}
+              <TTSControls
+                isInitialized={tts.isInitialized}
+                isEnabled={tts.isEnabled}
+                isSpeaking={tts.isSpeaking}
+                initializationError={tts.initializationError}
+                onToggleTTS={tts.toggleTTS}
+                onStopSpeaking={tts.stopSpeaking}
+                onInitialize={handleTTSInitialize}
+                isAuthenticated={isAuthenticated}
+                onLoginClick={handleLogin}
+              />
 
-                {/* Cloud Sync Status Indicator */}
-                <CloudSyncIndicator
-                  status={cloudSyncStatus}
-                  isAuthenticated={isAuthenticated}
-                />
+              {/* Cloud Sync Status Indicator */}
+              <CloudSyncIndicator
+                status={cloudSyncStatus}
+                isAuthenticated={isAuthenticated}
+              />
 
-                {/* Authentication Button */}
-                <AuthButton
-                  isAuthenticated={isAuthenticated}
-                  user={user}
-                  error={authError}
-                  isInitialized={isInitialized}
-                  onLogin={handleLogin}
-                  onLogout={handleLogout}
-                  onClearError={clearError}
-                  showProfile={true}
-                  onShowUserDetails={() => setShowUserModal(true)}
-                />
-              </div>
+              {/* Authentication Button */}
+              <AuthButton
+                isAuthenticated={isAuthenticated}
+                user={user}
+                error={authError}
+                isInitialized={isInitialized}
+                onLogin={handleLogin}
+                onLogout={handleLogout}
+                onClearError={clearError}
+                showProfile={true}
+                onShowUserDetails={() => setShowUserModal(true)}
+              />
             </div>
           </header>
           {/* === HEADER END === */}

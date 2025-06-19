@@ -309,8 +309,55 @@ export function useTTSChat(options: UseTTSChatOptions = {}): UseTTSChatReturn {
         setIsSpeaking(false);
       }
     },
-    [isEnabled, isInitialized, isSpeaking]
+    [isEnabled, isInitialized, isSpeaking, stopSpeaking]
   );
+
+  // Listen for authentication state changes to reinitialize TTS
+  useEffect(() => {
+    const handleAuthStateChange = async () => {
+      const isAuthenticated = authService.isSafelyAuthenticated();
+
+      if (isAuthenticated) {
+        logger.debug(
+          '🔐 Auth state changed to authenticated, reinitializing TTS'
+        );
+
+        // Clear cache for fresh credentials
+        frontendKeyVaultService.clearSecretsCache([
+          'azure-speech-service-key',
+          'azure-speech-service-region',
+          'azure-speech-service-endpoint',
+        ]);
+
+        // Force re-initialization
+        try {
+          const success = await initializeTTS();
+          if (success) {
+            logger.info('✅ TTS successfully reinitialized after login');
+          } else {
+            logger.warn('⚠️ TTS reinitialization failed after login');
+          }
+        } catch (error) {
+          logger.error('❌ TTS reinitialization error after login:', error);
+        }
+      } else {
+        // User logged out - TTS will fallback to browser built-in
+        logger.debug(
+          '🔐 Auth state changed to unauthenticated, TTS will use fallback'
+        );
+      }
+    };
+
+    // Listen for auth state changes
+    window.addEventListener('virpal:authStateChanged', handleAuthStateChange);
+
+    return () => {
+      window.removeEventListener(
+        'virpal:authStateChanged',
+        handleAuthStateChange
+      );
+    };
+  }, [initializeTTS]);
 
   // Computed properties
   const canSpeak = isInitialized && isEnabled && !isSpeaking;

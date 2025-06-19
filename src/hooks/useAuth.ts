@@ -348,12 +348,17 @@ export function useAuth(options: UseAuthOptions = {}): UseAuthReturn {
       // Setup auto refresh setelah login
       if (isAuthenticated && silentTokenRenewal && tokenRefreshThreshold) {
         setupTokenRefresh();
-      }
-
-      // Call onAuthStateChange callback if provided
+      } // Call onAuthStateChange callback if provided
       if (onAuthStateChange) {
         onAuthStateChange(isAuthenticated, user);
       }
+
+      // Dispatch auth state change event for service reinitialization
+      window.dispatchEvent(
+        new CustomEvent('virpal:authStateChanged', {
+          detail: { isAuthenticated, user },
+        })
+      );
 
       return result;
     } catch (error) {
@@ -392,12 +397,19 @@ export function useAuth(options: UseAuthOptions = {}): UseAuthReturn {
             // Setup auto refresh setelah login
             if (silentTokenRenewal && tokenRefreshThreshold) {
               setupTokenRefresh();
-            }
-
-            // Call onAuthStateChange callback if provided
+            } // Call onAuthStateChange callback if provided
             if (onAuthStateChange) {
               onAuthStateChange(true, user);
-            } // Return a mock result since we have successful authentication
+            }
+
+            // Dispatch auth state change event for service reinitialization
+            window.dispatchEvent(
+              new CustomEvent('virpal:authStateChanged', {
+                detail: { isAuthenticated: true, user },
+              })
+            );
+
+            // Return a mock result since we have successful authentication
             const currentAccount = authService.getCurrentAccount();
             return {
               accessToken,
@@ -471,13 +483,19 @@ export function useAuth(options: UseAuthOptions = {}): UseAuthReturn {
         isLoading: false,
         error: null,
       });
-
       setTokenInfo(null);
 
       // Call onAuthStateChange callback if provided
       if (onAuthStateChange) {
         onAuthStateChange(false, null);
       }
+
+      // Dispatch auth state change event for service cleanup
+      window.dispatchEvent(
+        new CustomEvent('virpal:authStateChanged', {
+          detail: { isAuthenticated: false, user: null },
+        })
+      );
     } catch (error) {
       handleError(error instanceof Error ? error : 'Logout failed');
       throw error;
